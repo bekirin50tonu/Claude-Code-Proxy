@@ -1,0 +1,12 @@
+services:
+  claude-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: claude_code_proxy
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./.env:/app/.env
+      - ./agent_workspace:/app/agent_workspace
+    restart: unless-stopped

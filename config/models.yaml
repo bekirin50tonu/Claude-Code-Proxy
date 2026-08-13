@@ -1,0 +1,61 @@
+claude_opus:
+  primary: nvidia_nim/meta/llama-3.3-70b-instruct
+  fallback_order:
+  - open_router/google/gemini-2.5-flash:free
+  - open_router/meta-llama/llama-3.3-70b-instruct:free
+  - nvidia_nim/meta/llama-3.1-70b-instruct
+  - nvidia_nim/meta/llama-3.1-8b-instruct
+  metadata:
+    context: 131072
+    max_output: 32768
+    rpm_limit: 15
+    tpm_limit: 200000
+    tags:
+    - reasoning
+    - agentic
+    - tool-calling
+    - coding
+claude_sonnet:
+  primary: nvidia_nim/meta/llama-3.1-70b-instruct
+  fallback_order:
+  - open_router/google/gemini-2.5-flash:free
+  - open_router/meta-llama/llama-3.3-70b-instruct:free
+  - nvidia_nim/meta/llama-3.3-70b-instruct
+  - nvidia_nim/meta/llama-3.1-8b-instruct
+  metadata:
+    context: 128000
+    max_output: 16384
+    rpm_limit: 15
+    tpm_limit: 200000
+    tags:
+    - coding
+    - tool-calling
+    - agentic
+claude_haiku:
+  primary: nvidia_nim/meta/llama-3.1-8b-instruct
+  fallback_order:
+  - open_router/google/gemini-2.5-flash:free
+  - open_router/meta-llama/llama-3-8b-instruct:free
+  - nvidia_nim/meta/llama-3.1-70b-instruct
+  metadata:
+    context: 32768
+    max_output: 8192
+    rpm_limit: 20
+    tpm_limit: 100000
+    tags:
+    - fast
+    - coding
+claude_default:
+  primary: nvidia_nim/meta/llama-3.1-70b-instruct
+  fallback_order:
+  - open_router/google/gemini-2.5-flash:free
+  - open_router/meta-llama/llama-3.3-70b-instruct:free
+  - nvidia_nim/meta/llama-3.1-8b-instruct
+  metadata:
+    context: 128000
+    max_output: 16384
+    rpm_limit: 15
+    tpm_limit: 200000
+    tags:
+    - coding
+    - tool-calling
