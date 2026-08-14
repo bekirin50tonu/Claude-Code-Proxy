@@ -114,19 +114,41 @@ class LiveBridgeManager:
 
                     msg_id = state.msg_ids.get(cid)
                     if not msg_id:
-                        sent_msg = await app.bot.send_message(
-                            chat_id=cid,
-                            text=text,
-                            parse_mode="MarkdownV2",
-                        )
+                        try:
+                            sent_msg = await app.bot.send_message(
+                                chat_id=cid,
+                                text=text,
+                                parse_mode="MarkdownV2",
+                            )
+                        except Exception:
+                            import re
+                            plain_text = re.sub(r"\\(.)", r"\1", text)
+                            sent_msg = await app.bot.send_message(
+                                chat_id=cid,
+                                text=plain_text,
+                                parse_mode=None,
+                            )
                         state.msg_ids[cid] = sent_msg.message_id
                     else:
-                        await app.bot.edit_message_text(
-                            chat_id=cid,
-                            message_id=msg_id,
-                            text=text,
-                            parse_mode="MarkdownV2",
-                        )
+                        try:
+                            await app.bot.edit_message_text(
+                                chat_id=cid,
+                                message_id=msg_id,
+                                text=text,
+                                parse_mode="MarkdownV2",
+                            )
+                        except Exception as e:
+                            if "Message is not modified" in str(e):
+                                pass
+                            else:
+                                import re
+                                plain_text = re.sub(r"\\(.)", r"\1", text)
+                                await app.bot.edit_message_text(
+                                    chat_id=cid,
+                                    message_id=msg_id,
+                                    text=plain_text,
+                                    parse_mode=None,
+                                )
                 except Exception as e:
                     if "Message is not modified" not in str(e):
                         logger.debug(f"Live thinking update edit error for chat {cid}: {e}")

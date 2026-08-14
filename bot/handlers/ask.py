@@ -129,8 +129,16 @@ async def handle_ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         try:
             await status_msg.edit_text(text=text, parse_mode=ParseMode.MARKDOWN_V2)
         except Exception as e:
-            if "Message is not modified" not in str(e):
-                logger.debug(f"/ask edit_text error: {e}")
+            if "Message is not modified" in str(e):
+                pass
+            else:
+                logger.warning(f"MarkdownV2 edit error in /ask: {e}. Falling back to plain text.")
+                try:
+                    plain_text = re.sub(r"\\(.)", r"\1", text)
+                    await status_msg.edit_text(text=plain_text, parse_mode=None)
+                except Exception as inner_e:
+                    if "Message is not modified" not in str(inner_e):
+                        logger.error(f"/ask fallback edit_text failed: {inner_e}")
 
     try:
         url = f"http://127.0.0.1:{settings.PORT}/v1/messages"
