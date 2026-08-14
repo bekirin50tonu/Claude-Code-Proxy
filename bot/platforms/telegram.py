@@ -1,8 +1,10 @@
 """Telegram Bot platform adapter using python-telegram-bot v20+."""
 
 import asyncio
+import contextlib
 import os
 import subprocess
+import time
 
 from loguru import logger
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -31,6 +33,7 @@ from bot.handlers.voice import handle_voice_message
 from bot.live_bridge import live_bridge_manager
 from config import settings, stats
 from core.router.circuit_breaker import circuit_breaker_registry
+from models import CircuitState
 
 
 class TelegramBotAdapter(BaseBotAdapter):
@@ -133,10 +136,24 @@ class TelegramBotAdapter(BaseBotAdapter):
             keyboard = [
                 [
                     InlineKeyboardButton(
-                        "🔌 Reset Circuit",
+                        "🟢 Reset Circuit (Enable)",
                         callback_data=f"reset_cb:{model_id}",
                     )
-                ]
+                ],
+                [
+                    InlineKeyboardButton(
+                        "⏳ +15 Min",
+                        callback_data=f"extend_cb:{model_id}:900",
+                    ),
+                    InlineKeyboardButton(
+                        "⏳ +1 Hour",
+                        callback_data=f"extend_cb:{model_id}:3600",
+                    ),
+                    InlineKeyboardButton(
+                        "⏳ +1 Day",
+                        callback_data=f"extend_cb:{model_id}:86400",
+                    ),
+                ],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -547,6 +564,55 @@ class TelegramBotAdapter(BaseBotAdapter):
                 )
             except Exception as e:
                 logger.warning(f"Failed to edit alert message on reset callback: {e}")
+
+        elif data.startswith("extend_cb:"):
+            parts = data.split(":", 2)
+            model_id = parts[1]
+            secs = float(parts[2])
+            cb = circuit_breaker_registry.get(model_id)
+
+            now_wall = time.time()
+            cb.started_at = now_wall
+            cb.expired_at = now_wall + secs
+            cb.recovery_timeout = secs
+            cb._state = CircuitState.OPEN
+            cb._opened_at_wall = time.strftime("%H:%M:%S", time.localtime(now_wall))
+            cb._reopens_at_wall = time.strftime("%H:%M:%S", time.localtime(cb.expired_at))
+
+            label = "15 min" if secs == 900 else ("1 hour" if secs == 3600 else "1 day")
+            cb._last_failure_reason = f"Extended via Telegram button (+{label})"
+            circuit_breaker_registry.save_to_file()
+
+            await query.answer(f"⏳ Timeout extended by +{label}!", show_alert=True)
+            esc_mid = escape_markdown_v2(model_id, is_code_block=True)
+            esc_reopen = escape_markdown_v2(cb._reopens_at_wall, is_code_block=True)
+            updated_text = (
+                "⏳ *Circuit Breaker Timeout Extended\\!*\n\n"
+                f"🔌 *Provider/Model:* `{esc_mid}`\n"
+                f"⏱️ *Extension:* `+{label}`\n"
+                f"🔓 *Reopens At:* `{esc_reopen}`\n\n"
+                "📊 *Status:* `OPEN` \\(Traffic Blocked\\)"
+            )
+            try:
+                await query.edit_message_text(
+                    text=updated_text,
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                    reply_markup=None,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to edit alert message on extend callback: {e}")
+
+        elif data.startswith("prompt_reply:"):
+            parts = data.split(":", 2)
+            session_id = parts[1]
+            answer = parts[2]
+            from bot.live_bridge import live_bridge
+            live_bridge.record_user_response(session_id, answer)
+
+            ans_upper = answer.upper()
+            await query.answer(f"✅ Response '{ans_upper}' recorded for Claude Code!", show_alert=True)
+            with contextlib.suppress(Exception):
+                await query.edit_message_reply_markup(reply_markup=None)
 
         elif data == "status_refresh":
             await query.answer("🔄 Status updated!")

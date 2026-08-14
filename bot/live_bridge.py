@@ -34,6 +34,7 @@ class LiveBridgeManager:
         self.active_watchers: set[str] = set()
         self.min_edit_interval: float = min_edit_interval  # Max 2 edits/sec
         self._session_states: dict[str, SessionLiveStreamState] = {}
+        self.pending_responses: dict[str, str] = {}
         self._lock = asyncio.Lock()
         self.load_state()
 
@@ -229,6 +230,19 @@ class LiveBridgeManager:
             details_lines.append(f"⚙️ *Executed Command:* `{esc_cmd}`")
 
         msg_text = "\n".join(details_lines)
+        sid = session_id or "default_session"
+
+        try:
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            keyboard = [
+                [
+                    InlineKeyboardButton("✅ Approve (Y)", callback_data=f"prompt_reply:{sid}:y"),
+                    InlineKeyboardButton("❌ Reject (N)", callback_data=f"prompt_reply:{sid}:n"),
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+        except Exception:
+            reply_markup = None
 
         for cid in list(watchers):
             try:
@@ -236,9 +250,21 @@ class LiveBridgeManager:
                     chat_id=cid,
                     text=msg_text,
                     parse_mode="MarkdownV2",
+                    reply_markup=reply_markup,
                 )
             except Exception as e:
                 logger.warning(f"Failed to dispatch tool call notification to {cid}: {e}")
+
+    def record_user_response(self, session_id: str, response: str) -> None:
+        """Record user approval / response for an active session from Telegram."""
+        sid = session_id or "default_session"
+        self.pending_responses[sid] = response.strip()
+        logger.info(f"LiveBridgeManager: User recorded response for '{sid}': {response}")
+
+    def pop_user_response(self, session_id: str) -> str | None:
+        """Pop and return recorded user response for session if available."""
+        sid = session_id or "default_session"
+        return self.pending_responses.pop(sid, None)
 
     async def dispatch_diff_report(
         self,
