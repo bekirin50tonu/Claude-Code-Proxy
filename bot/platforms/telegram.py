@@ -6,7 +6,7 @@ import subprocess
 
 from loguru import logger
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.constants import ParseMode
+from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -43,6 +43,14 @@ class TelegramBotAdapter(BaseBotAdapter):
     @property
     def platform_name(self) -> str:
         return "telegram"
+
+    async def _send_typing(self, update: Update) -> None:
+        """Send 'typing...' chat action indicator to Telegram."""
+        if update.effective_chat:
+            try:
+                await update.effective_chat.send_action(ChatAction.TYPING)
+            except Exception as e:
+                logger.debug(f"Failed to send typing indicator: {e}")
 
     async def start(self) -> None:
         """Build and launch the Telegram bot application in background."""
@@ -177,6 +185,8 @@ class TelegramBotAdapter(BaseBotAdapter):
                 await update.message.reply_text("❌ Access Denied: Unauthorized Telegram User.")
             return
 
+        await self._send_typing(update)
+
         keyboard = [
             [
                 InlineKeyboardButton("📊 Status Overview", callback_data="status_refresh"),
@@ -202,6 +212,8 @@ class TelegramBotAdapter(BaseBotAdapter):
         if not is_authorized_telegram(update):
             return
 
+        await self._send_typing(update)
+
         help_text = (
             "🛠️ *Claude Code Proxy Bot Commands*\n\n"
             "• `/status` \\- View proxy configuration and Circuit Breaker states\n"
@@ -222,6 +234,8 @@ class TelegramBotAdapter(BaseBotAdapter):
         if not is_authorized_telegram(update):
             return
 
+        await self._send_typing(update)
+
         keyboard = [[InlineKeyboardButton("🔄 Refresh Status", callback_data="status_refresh")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         status_text = format_status_overview_tg()
@@ -236,6 +250,8 @@ class TelegramBotAdapter(BaseBotAdapter):
     async def _cmd_live(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not is_authorized_telegram(update):
             return
+
+        await self._send_typing(update)
 
         chat_id = str(update.effective_chat.id) if update.effective_chat else ""
         sub = context.args[0].lower() if context.args else ""
@@ -261,6 +277,8 @@ class TelegramBotAdapter(BaseBotAdapter):
         if not is_authorized_telegram(update):
             return
 
+        await self._send_typing(update)
+
         if update.message:
             await update.message.reply_text("🛑 *Active task execution stopped\\.*", parse_mode=ParseMode.MARKDOWN_V2)
 
@@ -268,12 +286,16 @@ class TelegramBotAdapter(BaseBotAdapter):
         if not is_authorized_telegram(update):
             return
 
+        await self._send_typing(update)
+
         if update.message:
             await update.message.reply_text("🧹 *Session context cleared successfully\\.*", parse_mode=ParseMode.MARKDOWN_V2)
 
     async def _cmd_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not is_authorized_telegram(update):
             return
+
+        await self._send_typing(update)
 
         total_req = stats.total_requests
         mocked_req = stats.mocked_requests
@@ -295,6 +317,8 @@ class TelegramBotAdapter(BaseBotAdapter):
     async def _cmd_reset_circuit(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not is_authorized_telegram(update):
             return
+
+        await self._send_typing(update)
 
         if not context.args or len(context.args) < 1:
             if update.message:
@@ -332,6 +356,8 @@ class TelegramBotAdapter(BaseBotAdapter):
     async def _cmd_set_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not is_authorized_telegram(update):
             return
+
+        await self._send_typing(update)
 
         if not context.args or len(context.args) < 2:
             if update.message:
@@ -374,6 +400,8 @@ class TelegramBotAdapter(BaseBotAdapter):
         if not is_authorized_telegram(update):
             return
 
+        await self._send_typing(update)
+
         if not context.args:
             if update.message:
                 await update.message.reply_text("⚠️ Usage: `/run <bash command>`", parse_mode=ParseMode.MARKDOWN_V2)
@@ -388,9 +416,21 @@ class TelegramBotAdapter(BaseBotAdapter):
 
         if update.message:
             status_msg = await update.message.reply_text(
-                f"⏳ Executing `{esc_cmd}` in `{esc_ws}`\\...",
+                f"⏳ *Executing:* `{esc_cmd}`\n📂 *Workspace:* `{esc_ws}`",
                 parse_mode=ParseMode.MARKDOWN_V2,
             )
+
+            stop_typing = asyncio.Event()
+
+            async def keep_typing_loop() -> None:
+                while not stop_typing.is_set():
+                    await self._send_typing(update)
+                    try:
+                        await asyncio.sleep(4.0)
+                    except asyncio.CancelledError:
+                        break
+
+            typing_task = asyncio.create_task(keep_typing_loop())
 
             try:
                 loop = asyncio.get_running_loop()
@@ -420,6 +460,9 @@ class TelegramBotAdapter(BaseBotAdapter):
             except Exception as e:
                 esc_err = escape_markdown_v2(str(e), is_code_block=True)
                 await status_msg.edit_text(f"❌ Execution error: `{esc_err}`", parse_mode=ParseMode.MARKDOWN_V2)
+            finally:
+                stop_typing.set()
+                typing_task.cancel()
 
     async def _handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query

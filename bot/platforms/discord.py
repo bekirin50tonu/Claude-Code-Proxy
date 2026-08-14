@@ -68,114 +68,115 @@ class DiscordBotClient(discord.Client):
 
         content = message.content.strip()
 
-        # Handle !start or !help
-        if content in ("!start", "!help"):
-            help_text = (
-                "🛠️ **Claude Code Proxy Gateway Bot Commands**\n\n"
-                "• `!status` - View configuration and Circuit Breaker states\n"
-                "• `!reset_circuit <model_id|provider>` - Reset Circuit Breaker for model/provider to `CLOSED`\n"
-                "• `!set_model <KEY> <PROVIDER/MODEL>` - Update model mapping dynamically\n"
-                "• `!run <command>` - Execute bash command in workspace\n"
-                "• `!help` - Display this help message"
-            )
-            await message.reply(help_text)
+        async with message.channel.typing():
+            # Handle !start or !help
+            if content in ("!start", "!help"):
+                help_text = (
+                    "🛠️ **Claude Code Proxy Gateway Bot Commands**\n\n"
+                    "• `!status` - View configuration and Circuit Breaker states\n"
+                    "• `!reset_circuit <model_id|provider>` - Reset Circuit Breaker for model/provider to `CLOSED`\n"
+                    "• `!set_model <KEY> <PROVIDER/MODEL>` - Update model mapping dynamically\n"
+                    "• `!run <command>` - Execute bash command in workspace\n"
+                    "• `!help` - Display this help message"
+                )
+                await message.reply(help_text)
 
-        # Handle !status
-        elif content.startswith("!status"):
-            status_text = format_status_overview_discord()
-            await message.reply(status_text)
+            # Handle !status
+            elif content.startswith("!status"):
+                status_text = format_status_overview_discord()
+                await message.reply(status_text)
 
-        # Handle !reset_circuit <model_id>
-        elif content.startswith("!reset_circuit"):
-            parts = content.split(maxsplit=1)
-            if len(parts) < 2:
-                await message.reply("⚠️ Usage: `!reset_circuit <model_id|provider_name>`")
-                return
+            # Handle !reset_circuit <model_id>
+            elif content.startswith("!reset_circuit"):
+                parts = content.split(maxsplit=1)
+                if len(parts) < 2:
+                    await message.reply("⚠️ Usage: `!reset_circuit <model_id|provider_name>`")
+                    return
 
-            target = parts[1].strip()
-            all_breakers = circuit_breaker_registry._breakers
-            reset_models: list[str] = []
+                target = parts[1].strip()
+                all_breakers = circuit_breaker_registry._breakers
+                reset_models: list[str] = []
 
-            for mid, cb in list(all_breakers.items()):
-                if mid == target or mid.startswith(f"{target}/") or target in mid:
+                for mid, cb in list(all_breakers.items()):
+                    if mid == target or mid.startswith(f"{target}/") or target in mid:
+                        cb.reset()
+                        reset_models.append(mid)
+
+                if not reset_models:
+                    cb = circuit_breaker_registry.get(target)
                     cb.reset()
-                    reset_models.append(mid)
+                    reset_models.append(target)
 
-            if not reset_models:
-                cb = circuit_breaker_registry.get(target)
-                cb.reset()
-                reset_models.append(target)
-
-            models_str = ", ".join(f"`{m}`" for m in reset_models)
-            await message.reply(
-                "✅ **Circuit Breaker Reset!**\n\n"
-                f"🔌 **Reset Model(s):** {models_str}\n"
-                "📊 **New Status:** `CLOSED` (Requests Allowed)"
-            )
-
-        # Handle !set_model
-        elif content.startswith("!set_model"):
-            parts = content.split(maxsplit=2)
-            if len(parts) < 3:
+                models_str = ", ".join(f"`{m}`" for m in reset_models)
                 await message.reply(
-                    "⚠️ Usage: `!set_model <MODEL_KEY> <PROVIDER/MODEL>`\n"
-                    "Example: `!set_model MODEL_SONNET open_router/openai/gpt-4o`"
+                    "✅ **Circuit Breaker Reset!**\n\n"
+                    f"🔌 **Reset Model(s):** {models_str}\n"
+                    "📊 **New Status:** `CLOSED` (Requests Allowed)"
                 )
-                return
 
-            key, val = parts[1].upper(), parts[2]
-            if key == "MODEL_OPUS":
-                settings.MODEL_OPUS = val
-            elif key == "MODEL_SONNET":
-                settings.MODEL_SONNET = val
-            elif key == "MODEL_HAIKU":
-                settings.MODEL_HAIKU = val
-            elif key == "MODEL":
-                settings.MODEL = val
-            else:
-                await message.reply(
-                    f"❌ Invalid key `{key}`. Choose MODEL_OPUS, MODEL_SONNET, MODEL_HAIKU, or MODEL."
-                )
-                return
+            # Handle !set_model
+            elif content.startswith("!set_model"):
+                parts = content.split(maxsplit=2)
+                if len(parts) < 3:
+                    await message.reply(
+                        "⚠️ Usage: `!set_model <MODEL_KEY> <PROVIDER/MODEL>`\n"
+                        "Example: `!set_model MODEL_SONNET open_router/openai/gpt-4o`"
+                    )
+                    return
 
-            await message.reply(f"✅ Updated `{key}` to `{val}` successfully.")
+                key, val = parts[1].upper(), parts[2]
+                if key == "MODEL_OPUS":
+                    settings.MODEL_OPUS = val
+                elif key == "MODEL_SONNET":
+                    settings.MODEL_SONNET = val
+                elif key == "MODEL_HAIKU":
+                    settings.MODEL_HAIKU = val
+                elif key == "MODEL":
+                    settings.MODEL = val
+                else:
+                    await message.reply(
+                        f"❌ Invalid key `{key}`. Choose MODEL_OPUS, MODEL_SONNET, MODEL_HAIKU, or MODEL."
+                    )
+                    return
 
-        # Handle !run
-        elif content.startswith("!run"):
-            parts = content.split(maxsplit=1)
-            if len(parts) < 2:
-                await message.reply("⚠️ Usage: `!run <bash command>`")
-                return
+                await message.reply(f"✅ Updated `{key}` to `{val}` successfully.")
 
-            cmd = parts[1]
-            workspace = os.path.abspath(settings.CLAUDE_WORKSPACE)
-            os.makedirs(workspace, exist_ok=True)
+            # Handle !run
+            elif content.startswith("!run"):
+                parts = content.split(maxsplit=1)
+                if len(parts) < 2:
+                    await message.reply("⚠️ Usage: `!run <bash command>`")
+                    return
 
-            status_msg = await message.reply(f"⏳ Executing `{cmd}` in `{workspace}`...")
+                cmd = parts[1]
+                workspace = os.path.abspath(settings.CLAUDE_WORKSPACE)
+                os.makedirs(workspace, exist_ok=True)
 
-            try:
-                loop = asyncio.get_event_loop()
-                res = await loop.run_in_executor(
-                    None,
-                    lambda: subprocess.run(
-                        cmd,
-                        shell=True,
-                        cwd=workspace,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        timeout=60,
-                    ),
-                )
-                output = res.stdout or "Command finished with no output."
-                if len(output) > 1900:
-                    output = output[:1800] + "\n...(truncated)"
+                status_msg = await message.reply(f"⏳ Executing `{cmd}` in `{workspace}`...")
 
-                await status_msg.edit(content=f"```\n{output}\n```")
-            except subprocess.TimeoutExpired:
-                await status_msg.edit(content="❌ Command execution timed out (60s limit).")
-            except Exception as e:
-                await status_msg.edit(content=f"❌ Execution error: {e}")
+                try:
+                    loop = asyncio.get_event_loop()
+                    res = await loop.run_in_executor(
+                        None,
+                        lambda: subprocess.run(
+                            cmd,
+                            shell=True,
+                            cwd=workspace,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            timeout=60,
+                        ),
+                    )
+                    output = res.stdout or "Command finished with no output."
+                    if len(output) > 1900:
+                        output = output[:1800] + "\n...(truncated)"
+
+                    await status_msg.edit(content=f"```\n{output}\n```")
+                except subprocess.TimeoutExpired:
+                    await status_msg.edit(content="❌ Command execution timed out (60s limit).")
+                except Exception as e:
+                    await status_msg.edit(content=f"❌ Execution error: {e}")
 
 
 class DiscordBotAdapter(BaseBotAdapter):

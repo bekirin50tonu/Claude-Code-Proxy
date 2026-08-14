@@ -104,8 +104,14 @@ class LiveBridgeManager:
                 return
 
             app = tg_adapter.app
-            for cid in list(self.active_watchers):
+            for cid in list(watchers):
                 try:
+                    try:
+                        from telegram.constants import ChatAction
+                        await app.bot.send_chat_action(chat_id=cid, action=ChatAction.TYPING)
+                    except Exception:
+                        pass
+
                     msg_id = state.msg_ids.get(cid)
                     if not msg_id:
                         sent_msg = await app.bot.send_message(
