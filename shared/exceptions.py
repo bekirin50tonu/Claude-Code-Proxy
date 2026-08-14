@@ -76,3 +76,25 @@ class SubagentPolicyViolationError(ProxyBaseError):
         )
         self.subagent_id = subagent_id
         self.reason = reason
+
+
+class NimQueueTimeoutError(RateLimitExceededError):
+    """Raised when an NVIDIA NIM request waits in queue longer than maximum allowed queue wait time."""
+
+    def __init__(self, model_name: str, waited_seconds: float, max_queue_wait: float):
+        msg = (
+            f"NVIDIA NIM queue timeout for '{model_name}': waited {waited_seconds:.1f}s "
+            f"(exceeded max queue wait of {max_queue_wait:.1f}s)."
+        )
+        ProxyBaseError.__init__(
+            self,
+            message=msg,
+            status_code=429,
+            details={"model_name": model_name, "waited_seconds": waited_seconds, "max_queue_wait": max_queue_wait},
+        )
+        self.model_name = model_name
+        self.retry_after = waited_seconds
+        self.waited_seconds = waited_seconds
+        self.max_queue_wait = max_queue_wait
+
+

@@ -1038,3 +1038,59 @@ def test_multi_key_rotation() -> None:
     assert _select_key(single_key, "single_prov") == "nvapi-single-key"
 
 
+def test_model_registry_custom_primary_and_empty_fallbacks() -> None:
+    """Test that ModelRegistry respects user settings over static models.yaml defaults and respects empty fallback lists."""
+    from config import model_registry, settings
+
+    # 1. Custom primary model from settings
+    settings.MODEL_OPUS = "open_router/google/gemini-2.5-pro"
+    assert model_registry.get_primary("claude-3-opus") == "open_router/google/gemini-2.5-pro"
+
+    # 2. Direct provider model path pass-through
+    assert model_registry.get_primary("open_router/deepseek/deepseek-chat") == "open_router/deepseek/deepseek-chat"
+    assert model_registry.get_fallbacks("open_router/deepseek/deepseek-chat") == []
+
+    # 3. Empty fallback list behavior
+    model_registry._entries["claude_opus"].fallback_order = []
+    assert model_registry.get_fallbacks("claude-3-opus") == []
+
+
+def test_synthetic_tool_call_injection_verification_turn() -> None:
+    """Test that BaseProvider.translate_messages injects synthetic tool_calls into preceding assistant messages when tool_results are present."""
+    from providers.openai import OpenAICompatibleProvider
+
+    prov = OpenAICompatibleProvider()
+
+    # Simulating Turn 2 Anthropic message history where Turn 1 was a Heuristic Tool Call (assistant returned flat text, CLI returns tool_result)
+    messages = [
+        {"role": "user", "content": "list files"},
+        {"role": "assistant", "content": "I will run bash command for you."},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_abc123",
+                    "name": "bash",
+                    "content": "file1.txt\nfile2.txt",
+                }
+            ],
+        },
+    ]
+
+    openai_msgs = prov.translate_messages(messages)
+
+    # Verify assistant message now has synthetic tool_calls with id toolu_abc123
+    assistant_msg = [m for m in openai_msgs if m["role"] == "assistant"][0]
+    assert "tool_calls" in assistant_msg
+    assert assistant_msg["tool_calls"][0]["id"] == "toolu_abc123"
+    assert assistant_msg["tool_calls"][0]["function"]["name"] == "bash"
+
+    # Verify tool message has tool_call_id toolu_abc123
+    tool_msg = [m for m in openai_msgs if m["role"] == "tool"][0]
+    assert tool_msg["tool_call_id"] == "toolu_abc123"
+    assert tool_msg["content"] == "file1.txt\nfile2.txt"
+
+
+
+

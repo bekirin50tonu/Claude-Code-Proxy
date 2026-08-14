@@ -1,10 +1,29 @@
-claude_opus:
-  primary: nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct
+claude_default:
+  display_name: 1. Default (Recommended - Opus 5 / Nemotron 70B)
+  description: "Claude Code CLI Default Selection \u2014 Highest capacity 1M context\
+    \ model"
+  primary: open_router/poolside/laguna-xs-2.1:free
   fallback_order:
-  - nvidia_nim/meta/llama-3.1-70b-instruct
   - open_router/meta-llama/llama-3.3-70b-instruct
   - open_router/google/gemini-2.5-flash
-  - open_router/deepseek/deepseek-chat
+  metadata:
+    context: 1000000
+    max_output: 32768
+    rpm_limit: 15
+    tpm_limit: 200000
+    tags:
+    - default
+    - opus-5
+    - 1m-context
+    - agentic
+    - coding
+claude_opus:
+  display_name: 2. Opus (1M context - Nemotron 70B / Llama 3.3)
+  description: "Opus 5 with 1M context \u2014 Best for everyday, complex tasks"
+  primary: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
+  fallback_order:
+  - open_router/meta-llama/llama-3.3-70b-instruct
+  - open_router/google/gemini-2.5-flash
   metadata:
     context: 1000000
     max_output: 32768
@@ -15,18 +34,34 @@ claude_opus:
     - 1m-context
     - reasoning
     - agentic
-    - tool-calling
     - coding
 claude_sonnet:
-  primary: nvidia_nim/meta/llama-3.1-70b-instruct
+  display_name: 3. Sonnet (Llama 3.1 70B)
+  description: "Sonnet \u2014 Efficient for routine tasks"
+  primary: nvidia_nim/z-ai/glm-5.2
   fallback_order:
   - open_router/meta-llama/llama-3.3-70b-instruct
   - open_router/google/gemini-2.5-flash
-  - open_router/arcee-ai/trinity-large-preview:free
-  - nvidia_nim/meta/llama-3.1-8b-instruct
   metadata:
     context: 1000000
     max_output: 16384
+    rpm_limit: 15
+    tpm_limit: 200000
+    tags:
+    - sonnet
+    - coding
+    - tool-calling
+    - agentic
+claude_sonnet_1m:
+  display_name: 4. Sonnet 5 (1M context - Llama 3.3 70B)
+  description: Sonnet 5 for long sessions with 1M context
+  primary: nvidia_nim/z-ai/glm-5.2
+  fallback_order:
+  - open_router/meta-llama/llama-3.3-70b-instruct
+  - open_router/google/gemini-2.5-flash
+  metadata:
+    context: 1000000
+    max_output: 32768
     rpm_limit: 15
     tpm_limit: 200000
     tags:
@@ -34,13 +69,13 @@ claude_sonnet:
     - 1m-context
     - coding
     - tool-calling
-    - agentic
 claude_haiku:
-  primary: nvidia_nim/meta/llama-3.1-8b-instruct
+  display_name: 5. Haiku (Fastest 8B / Flash)
+  description: "Haiku 4.5 \u2014 Fastest for quick answers"
+  primary: nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b
   fallback_order:
-  - open_router/stepfun/step-3.5-flash:free
   - open_router/google/gemini-2.5-flash
-  - nvidia_nim/meta/llama-3.1-70b-instruct
+  - open_router/meta-llama/llama-3.3-70b-instruct
   metadata:
     context: 200000
     max_output: 8192
@@ -50,19 +85,3 @@ claude_haiku:
     - haiku-4.5
     - fast
     - coding
-claude_default:
-  primary: nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct
-  fallback_order:
-  - nvidia_nim/meta/llama-3.1-70b-instruct
-  - open_router/meta-llama/llama-3.3-70b-instruct
-  - open_router/google/gemini-2.5-flash
-  metadata:
-    context: 1000000
-    max_output: 32768
-    rpm_limit: 15
-    tpm_limit: 200000
-    tags:
-    - opus-5
-    - default
-    - coding
-    - tool-calling

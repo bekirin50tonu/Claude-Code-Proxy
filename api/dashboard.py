@@ -102,9 +102,11 @@ def get_key_statuses() -> dict[str, str]:
         "FIREWORKS_BASE_URL",
         "MODEL_OPUS",
         "MODEL_SONNET",
+        "MODEL_SONNET_1M",
         "MODEL_HAIKU",
         "MODEL",
     ]
+
     for k in managed_keys:
         val_in_env = k in env_keys
         val_in_os = k in os.environ and bool(os.environ[k].strip())
@@ -262,8 +264,10 @@ async def get_config() -> JSONResponse:
         "FIREWORKS_BASE_URL": settings.FIREWORKS_BASE_URL,
         "MODEL_OPUS": settings.MODEL_OPUS,
         "MODEL_SONNET": settings.MODEL_SONNET,
+        "MODEL_SONNET_1M": getattr(settings, "MODEL_SONNET_1M", ""),
         "MODEL_HAIKU": settings.MODEL_HAIKU,
         "MODEL": settings.MODEL,
+
         "PROVIDER_RATE_LIMIT": settings.PROVIDER_RATE_LIMIT,
         "PROVIDER_RATE_WINDOW": settings.PROVIDER_RATE_WINDOW,
         "PROVIDER_MAX_CONCURRENCY": settings.PROVIDER_MAX_CONCURRENCY,
@@ -326,8 +330,23 @@ async def save_config(req: ConfigSaveRequest) -> JSONResponse:
                     fb_list = val
                 else:
                     fb_list = []
-                fallback_updates[alias] = {"fallback_order": fb_list}
+                if alias not in fallback_updates:
+                    fallback_updates[alias] = {}
+                fallback_updates[alias]["fallback_order"] = fb_list
                 continue
+
+            if key in ("MODEL_OPUS", "MODEL_SONNET", "MODEL_SONNET_1M", "MODEL_HAIKU", "MODEL"):
+                alias_map = {
+                    "MODEL_OPUS": "claude_opus",
+                    "MODEL_SONNET": "claude_sonnet",
+                    "MODEL_SONNET_1M": "claude_sonnet_1m",
+                    "MODEL_HAIKU": "claude_haiku",
+                    "MODEL": "claude_default",
+                }
+                alias = alias_map[key]
+                if alias not in fallback_updates:
+                    fallback_updates[alias] = {}
+                fallback_updates[alias]["primary"] = str(val).strip()
 
             if statuses.get(key) == "Locked":
                 # Skip saving locked env variables to .env
@@ -340,6 +359,7 @@ async def save_config(req: ConfigSaveRequest) -> JSONResponse:
 
         settings.reload()
         model_registry.reload()
+
         return JSONResponse(
             content={
                 "status": "success",
@@ -400,10 +420,16 @@ async def get_router_status() -> JSONResponse:
     )
     healthy_count = len(status_data) - open_count
 
-    # Build resolution mappings matrix
-    client_models = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4.5"]
+    # Build resolution mappings matrix matching Claude Code CLI menu (1 to 5)
+    client_models = [
+        ("claude_default", "1. DEFAULT (RECOMMENDED)", "Default Model (Opus 5 / Nemotron 70B)"),
+        ("claude_opus", "2. OPUS (1M CONTEXT)", "Opus 5 (1M context)"),
+        ("claude_sonnet", "3. SONNET", "Sonnet (Llama 3.1 70B)"),
+        ("claude_sonnet_1m", "4. SONNET 5 (1M CONTEXT)", "Sonnet 5 (1M context)"),
+        ("claude_haiku", "5. HAIKU", "Haiku 4.5 (Llama 3.1 8B)"),
+    ]
     mappings_matrix = []
-    for c_model in client_models:
+    for c_model, label, desc in client_models:
         primary = model_registry.get_primary(c_model)
         fallbacks = model_registry.get_fallbacks(c_model)
         all_chain = [c for c in ([primary] + fallbacks) if c]
@@ -422,13 +448,16 @@ async def get_router_status() -> JSONResponse:
         mappings_matrix.append(
             {
                 "client_model": c_model,
-                "label": c_model.upper(),
+                "label": label,
+                "description": desc,
+                "primary": primary,
                 "resolved_target": resolved,
                 "is_fallback": is_fallback,
                 "step_name": step_name,
                 "chain": all_chain,
             }
         )
+
 
     return JSONResponse(
         content={

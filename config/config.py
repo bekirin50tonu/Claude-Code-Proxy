@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import time
@@ -73,10 +74,22 @@ class ModelRegistry:
             )
 
     def _resolve_alias(self, client_model: str) -> str:
-        """Map a Claude client model string to a registry alias."""
+        """Map a Claude client model string to a registry alias.
+
+        Ordered matching corresponding to Claude Code CLI selection menu (1 to 5):
+        1. Default (recommended) -> claude_default
+        2. Opus (1M context)     -> claude_opus
+        3. Sonnet                -> claude_sonnet
+        4. Sonnet 5 (1M context) -> claude_sonnet_1m
+        5. Haiku                 -> claude_haiku
+        """
         lower = client_model.lower()
+        if "default" in lower:
+            return "claude_default"
         if "opus" in lower:
             return "claude_opus"
+        if any(k in lower for k in ["3-7-sonnet", "3.7-sonnet", "sonnet-5", "sonnet-1m"]) or ("1m" in lower and "sonnet" in lower):
+            return "claude_sonnet_1m"
         if "sonnet" in lower:
             return "claude_sonnet"
         if "haiku" in lower:
@@ -84,27 +97,39 @@ class ModelRegistry:
         return "claude_default"
 
     def get_primary(self, client_model: str) -> str:
+        # If client_model is a full provider model string (e.g. open_router/model or nvidia_nim/model)
+        if "/" in client_model and not client_model.startswith("claude"):
+            return client_model
+
         alias = self._resolve_alias(client_model)
+
+        # 1. Prioritize active Settings (from .env / dashboard edits)
+        settings_obj = globals().get("settings")
+        if settings_obj:
+            if alias == "claude_opus" and getattr(settings_obj, "MODEL_OPUS", None):
+                return settings_obj.MODEL_OPUS
+            if alias == "claude_sonnet" and getattr(settings_obj, "MODEL_SONNET", None):
+                return settings_obj.MODEL_SONNET
+            if alias == "claude_sonnet_1m" and getattr(settings_obj, "MODEL_SONNET_1M", None):
+                return settings_obj.MODEL_SONNET_1M
+            if alias == "claude_haiku" and getattr(settings_obj, "MODEL_HAIKU", None):
+                return settings_obj.MODEL_HAIKU
+            if alias == "claude_default" and getattr(settings_obj, "MODEL", None):
+                return settings_obj.MODEL
+
+        # 2. Fall back to models.yaml entry
         entry = self._entries.get(alias)
         if entry and entry.primary:
             return entry.primary
-        # Fallback to .env values
-        settings_obj = globals().get("settings")
-        if settings_obj:
-            lower = client_model.lower()
-            if "opus" in lower:
-                return settings_obj.MODEL_OPUS
-            if "sonnet" in lower:
-                return settings_obj.MODEL_SONNET
-            if "haiku" in lower:
-                return settings_obj.MODEL_HAIKU
-            return settings_obj.MODEL
-        return "nvidia_nim/z-ai/glm4.7"
+        return "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct"
 
     def get_fallbacks(self, client_model: str) -> list[str]:
+        if "/" in client_model and not client_model.startswith("claude"):
+            return []
         alias = self._resolve_alias(client_model)
         entry = self._entries.get(alias)
-        return entry.fallback_order if entry else []
+        return list(entry.fallback_order) if entry and entry.fallback_order is not None else []
+
 
     def get_metadata(self, model_id: str) -> ModelMetadata:
         """Return metadata for a concrete upstream model_id or a client alias."""
@@ -217,15 +242,24 @@ class Settings:
     MODEL_SONNET: str = os.getenv(
         "MODEL_SONNET", "nvidia_nim/meta/llama-3.1-70b-instruct"
     )
+    MODEL_SONNET_1M: str = os.getenv(
+        "MODEL_SONNET_1M", "open_router/meta-llama/llama-3.3-70b-instruct"
+    )
     MODEL_HAIKU: str = os.getenv(
         "MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct"
     )
     MODEL: str = os.getenv("MODEL", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
 
+
     # Provider rate limits and performance controls
     PROVIDER_RATE_LIMIT: int = get_int("PROVIDER_RATE_LIMIT", 40)
     PROVIDER_RATE_WINDOW: int = get_int("PROVIDER_RATE_WINDOW", 60)
     PROVIDER_MAX_CONCURRENCY: int = get_int("PROVIDER_MAX_CONCURRENCY", 5)
+
+    # Dedicated NVIDIA NIM Proactive Rate Limiter & Guard settings
+    NVIDIA_NIM_SAFE_RPM: int = get_int("NVIDIA_NIM_SAFE_RPM", 38)
+    NVIDIA_NIM_WINDOW_SECONDS: int = get_int("NVIDIA_NIM_WINDOW_SECONDS", 60)
+    NVIDIA_NIM_MAX_QUEUE_WAIT: int = get_int("NVIDIA_NIM_MAX_QUEUE_WAIT", 30)
 
     # HTTP client timeouts
     HTTP_READ_TIMEOUT: int = get_int("HTTP_READ_TIMEOUT", 120)
@@ -332,14 +366,22 @@ class Settings:
         self.MODEL_SONNET = os.getenv(
             "MODEL_SONNET", "nvidia_nim/meta/llama-3.1-70b-instruct"
         )
+        self.MODEL_SONNET_1M = os.getenv(
+            "MODEL_SONNET_1M", "open_router/meta-llama/llama-3.3-70b-instruct"
+        )
         self.MODEL_HAIKU = os.getenv(
             "MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct"
         )
         self.MODEL = os.getenv("MODEL", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
 
+
         self.PROVIDER_RATE_LIMIT = get_int("PROVIDER_RATE_LIMIT", 40)
         self.PROVIDER_RATE_WINDOW = get_int("PROVIDER_RATE_WINDOW", 60)
         self.PROVIDER_MAX_CONCURRENCY = get_int("PROVIDER_MAX_CONCURRENCY", 5)
+
+        self.NVIDIA_NIM_SAFE_RPM = get_int("NVIDIA_NIM_SAFE_RPM", 38)
+        self.NVIDIA_NIM_WINDOW_SECONDS = get_int("NVIDIA_NIM_WINDOW_SECONDS", 60)
+        self.NVIDIA_NIM_MAX_QUEUE_WAIT = get_int("NVIDIA_NIM_MAX_QUEUE_WAIT", 30)
 
         self.HTTP_READ_TIMEOUT = get_int("HTTP_READ_TIMEOUT", 120)
         self.HTTP_WRITE_TIMEOUT = get_int("HTTP_WRITE_TIMEOUT", 10)
@@ -405,6 +447,32 @@ class ProxyStats:
     ) -> None:
         self._request_counter += 1
         duration_ms = round((time.time() - start_time) * 1000, 2)
+
+        # Calculate token counts
+        input_tokens = 0
+        output_tokens = 0
+
+        if request_body and isinstance(request_body, dict):
+            from atomic.guards.token_budget import TokenBudgetGuard
+            guard = TokenBudgetGuard(client_model)
+            input_tokens = guard.count_prompt_tokens(
+                request_body.get("messages", []),
+                request_body.get("system"),
+                request_body.get("tools"),
+            )
+
+        if response_body:
+            if isinstance(response_body, dict):
+                usage = response_body.get("usage", {})
+                if isinstance(usage, dict) and usage.get("output_tokens"):
+                    output_tokens = int(usage["output_tokens"])
+                elif isinstance(usage, dict) and usage.get("completion_tokens"):
+                    output_tokens = int(usage["completion_tokens"])
+                else:
+                    output_tokens = len(json.dumps(response_body)) // 4
+            elif isinstance(response_body, str):
+                output_tokens = len(response_body) // 4
+
         entry = RequestLogEntry(
             id=f"req_{self._request_counter}_{int(time.time())}",
             timestamp=time.strftime("%H:%M:%S"),
@@ -419,11 +487,14 @@ class ProxyStats:
             request_body=request_body,
             response_body=response_body,
             headers=headers or {},
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
         self.recent_requests.insert(0, entry)
         # Keep last 50 requests
         if len(self.recent_requests) > 50:
             self.recent_requests.pop()
+
 
     def get_recent_dicts(self, include_payload: bool = True) -> list[dict[str, Any]]:
         return [entry.to_dict(include_payload=include_payload) for entry in self.recent_requests]

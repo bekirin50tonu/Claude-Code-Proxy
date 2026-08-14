@@ -26,6 +26,8 @@ class RequestLogEntry:
     request_body: dict[str, Any] | None = None
     response_body: dict[str, Any] | str | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     @property
     def is_success(self) -> bool:
@@ -48,12 +50,16 @@ class RequestLogEntry:
             "duration_ms": self.duration_ms,
             "mocked": self.mocked,
             "fallbacks_used": self.fallbacks_used,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.input_tokens + self.output_tokens,
         }
         if include_payload:
             data["request_body"] = self.request_body
             data["response_body"] = self.response_body
             data["headers"] = self.headers
         return data
+
 
 
 @dataclass

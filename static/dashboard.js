@@ -114,7 +114,7 @@ async function saveConfigs(event) {
     }
 
     // Also collect Fallback Chains from tagState
-    ['CLAUDE_OPUS', 'CLAUDE_SONNET', 'CLAUDE_HAIKU', 'CLAUDE_DEFAULT'].forEach(alias => {
+    ['CLAUDE_DEFAULT', 'CLAUDE_OPUS', 'CLAUDE_SONNET', 'CLAUDE_SONNET_1M', 'CLAUDE_HAIKU'].forEach(alias => {
         const inputId = 'FALLBACK_ORDER_' + alias;
         // Add any remaining text typed in input before saving
         const inputEl = document.getElementById(inputId);
@@ -123,6 +123,7 @@ async function saveConfigs(event) {
         }
         payload[inputId] = (tagState[inputId] || []).join(', ');
     });
+
 
     try {
         const resp = await fetch('/api/config', {
@@ -417,12 +418,16 @@ class PayloadDataTable {
             tr.style.borderBottom = '1px solid var(--border-subtle)';
 
             const statusClass = req.status_code === 200 ? 'color: #4ade80;' : 'color: #f87171;';
+            const inTok = req.input_tokens || 0;
+            const outTok = req.output_tokens || 0;
+            const tokBadge = `<span style="font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #60a5fa;">📥 ${inTok.toLocaleString()} / 📤 ${outTok.toLocaleString()} tok</span>`;
 
             tr.innerHTML = `
                 <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">${req.timestamp}</td>
                 <td style="padding: 0.75rem 1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">${req.method} ${req.path}</td>
                 <td style="padding: 0.75rem 1rem; color: white;">${req.client_model || '-'}</td>
                 <td style="padding: 0.75rem 1rem; color: #fef08a; font-family: 'JetBrains Mono', monospace;">${req.mapped_model || '-'}</td>
+                <td style="padding: 0.75rem 1rem;">${tokBadge}</td>
                 <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">${req.duration_ms} ms</td>
                 <td style="padding: 0.75rem 1rem; ${statusClass} font-weight: 700;">${req.status_code}</td>
                 <td style="padding: 0.75rem 1rem; text-align: right;">
@@ -465,7 +470,13 @@ async function openJsonModal(reqId) {
         
         document.getElementById('modal-meta-client').innerText = payload.client_model || payload.path;
         document.getElementById('modal-meta-mapped').innerText = payload.mapped_model || '-';
-        document.getElementById('modal-meta-info').innerText = `${payload.method} ${payload.path} | ${payload.status_code} | ${payload.duration_ms} ms`;
+
+        const inT = (payload.input_tokens || 0).toLocaleString();
+        const outT = (payload.output_tokens || 0).toLocaleString();
+        const totalT = ((payload.input_tokens || 0) + (payload.output_tokens || 0)).toLocaleString();
+
+        document.getElementById('modal-meta-info').innerText = `${payload.method} ${payload.path} | Status: ${payload.status_code} | Latency: ${payload.duration_ms} ms | 📥 In: ${inT} | 📤 Out: ${outT} (Total: ${totalT} tok)`;
+
 
         renderModalSideBySide();
 
@@ -797,11 +808,13 @@ function handleAutocomplete(inputId) {
 
 // Tag State Management
 const tagState = {
+    FALLBACK_ORDER_CLAUDE_DEFAULT: [],
     FALLBACK_ORDER_CLAUDE_OPUS: [],
     FALLBACK_ORDER_CLAUDE_SONNET: [],
+    FALLBACK_ORDER_CLAUDE_SONNET_1M: [],
     FALLBACK_ORDER_CLAUDE_HAIKU: [],
-    FALLBACK_ORDER_CLAUDE_DEFAULT: [],
 };
+
 
 function renderTags(inputId) {
     const container = document.getElementById('tag-container-' + inputId);

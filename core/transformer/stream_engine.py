@@ -7,10 +7,13 @@ from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any
 
 from atomic.guards.subagent import SubagentGuard
-from atomic.parsers.heuristic_tool import HeuristicToolParser
-from atomic.parsers.thinking import ThinkingParser
+from atomic.parsers.heuristic_tool import (
+    HeuristicToolStatefulParser,
+)
+from atomic.parsers.thinking import ThinkingStatefulParser
 from cli.session import session_manager
 from models.converter import ModelConverter
+from shared.utils.sse_helper import AnthropicSSEFormatter
 
 
 def safe_parse_json(json_str: str | None) -> Any:
@@ -170,9 +173,11 @@ class StreamEngine:
 
         self.block_index = -1
         self.sent_start = False
+        self.text_or_tool_emitted = False
+        self.preemptive_text_emitted = False
 
-        self.thinking_parser = ThinkingParser(block_index_provider=self._next_block_index)
-        self.heuristic_tool_parser = HeuristicToolParser(block_index_provider=self._next_block_index)
+        self.thinking_parser = ThinkingStatefulParser(block_index_provider=self._next_block_index)
+        self.heuristic_tool_parser = HeuristicToolStatefulParser(block_index_provider=self._next_block_index)
         self.subagent_guard = SubagentGuard()
 
         self.accumulated_thinking: list[str] = []
@@ -212,7 +217,7 @@ class StreamEngine:
         for tc in self.accumulated_tool_calls:
             blocks.append(tc)
         if not blocks:
-            blocks.append({"type": "text", "text": ""})
+            blocks.append({"type": "text", "text": " "})
         return {
             "id": self.message_id,
             "type": "message",
@@ -224,14 +229,18 @@ class StreamEngine:
             "usage": self.final_usage,
         }
 
-    async def stream_response(
-        self, upstream_stream: AsyncIterable[dict[str, Any] | str]
+    async def transform_stream(
+        self, upstream_stream: AsyncIterable[dict[str, Any] | str | bytes]
     ) -> AsyncGenerator[str, None]:
-        """Async generator yielding Anthropic SSE event strings on-the-fly."""
+        """Asynchronously transform upstream OpenAI/NIM SSE stream into Anthropic SSE stream."""
         if not self.sent_start:
             self.sent_start = True
-            start_event = ModelConverter.build_sse_message_start(self.message_id, self.target_model)
-            yield start_event.to_sse()
+            yield AnthropicSSEFormatter.message_start(
+                message_id=self.message_id,
+                model=self.target_model,
+                input_tokens=0,
+                output_tokens=0,
+            )
 
         input_tokens = 0
         output_tokens = 0
@@ -274,19 +283,22 @@ class StreamEngine:
 
             delta = choice.get("delta", {})
 
-            # Reasoning content
+            # 1. Native reasoning_content
             reasoning = delta.get("reasoning_content") or ""
             if reasoning:
-                events = await self.thinking_parser.process_chunk({"choices": [{"delta": {"reasoning_content": reasoning}}]})
+                events = await self.thinking_parser.process_chunk(
+                    {"choices": [{"delta": {"reasoning_content": reasoning}}]}
+                )
                 for ev in events:
                     if hasattr(ev, "delta") and getattr(ev.delta, "type", None) == "thinking_delta":
                         self.accumulated_thinking.append(getattr(ev.delta, "thinking", ""))
                     yield ev.to_sse()
                 continue
 
-            # Native tool_calls delta
+            # 2. Native tool_calls delta
             tool_calls_delta = delta.get("tool_calls") or []
             if tool_calls_delta:
+                self.text_or_tool_emitted = True
                 for tc in tool_calls_delta:
                     tc_index = tc.get("index", 0)
                     tc_id = tc.get("id")
@@ -300,7 +312,9 @@ class StreamEngine:
                                 full_args_str = "".join(self.accumulated_tool_args)
                                 parsed_args = safe_parse_json(full_args_str) or {}
                                 if isinstance(parsed_args, dict):
-                                    parsed_args = await self.subagent_guard.enforce_tool_call(self.active_tool_name, parsed_args)
+                                    parsed_args = await self.subagent_guard.enforce_tool_call(
+                                        self.active_tool_name, parsed_args
+                                    )
                                 self.accumulated_tool_calls.append(
                                     {
                                         "type": "tool_use",
@@ -311,8 +325,7 @@ class StreamEngine:
                                 )
                                 self.accumulated_tool_args = []
 
-                            stop_ev = ModelConverter.build_sse_block_stop(self._get_current_index())
-                            yield stop_ev.to_sse()
+                            yield AnthropicSSEFormatter.block_stop(self._get_current_index())
 
                         self.current_tool_index = tc_index
                         self.active_tool_id = tc_id or f"toolu_{uuid.uuid4().hex[:10]}"
@@ -320,10 +333,7 @@ class StreamEngine:
                         self.current_block_type = "tool_use"
 
                         idx = self._next_block_index()
-                        start_ev = ModelConverter.build_sse_block_start(
-                            idx, "tool_use", {"id": self.active_tool_id, "name": self.active_tool_name}
-                        )
-                        yield start_ev.to_sse()
+                        yield AnthropicSSEFormatter.tool_use_start(idx, self.active_tool_id, self.active_tool_name)
                     else:
                         if tc_id and not self.active_tool_id:
                             self.active_tool_id = tc_id
@@ -332,15 +342,12 @@ class StreamEngine:
 
                     if tc_args:
                         self.accumulated_tool_args.append(tc_args)
-                        delta_ev = ModelConverter.build_sse_block_delta(
-                            self._get_current_index(), "input_json_delta", tc_args
-                        )
-                        yield delta_ev.to_sse()
+                        yield AnthropicSSEFormatter.input_json_delta(tc_args, self._get_current_index())
 
                 finish_reason = "tool_calls"
                 continue
 
-            # Text stream content through atomic parsers
+            # 3. Content deltas (Text stream content through atomic parsers)
             content = delta.get("content") or ""
             if content:
                 think_events = await self.thinking_parser.process_chunk(content)
@@ -351,41 +358,61 @@ class StreamEngine:
                             if dtype == "thinking_delta":
                                 self.accumulated_thinking.append(getattr(ev.delta, "thinking", ""))
                             elif dtype == "text_delta":
-                                self.accumulated_text.append(getattr(ev.delta, "text", ""))
+                                text_val = getattr(ev.delta, "text", "")
+                                self.accumulated_text.append(text_val)
+                                if text_val:
+                                    self.text_or_tool_emitted = True
                         yield ev.to_sse()
                 else:
                     tool_events = await self.heuristic_tool_parser.process_chunk(content)
                     if tool_events:
                         for ev in tool_events:
+                            if hasattr(ev, "content_block") and getattr(ev.content_block, "type", None) == "tool_use" or (
+                                hasattr(ev, "delta")
+                                and getattr(ev.delta, "type", None) == "text_delta"
+                                and getattr(ev.delta, "text", "")
+                            ):
+                                self.text_or_tool_emitted = True
+
                             yield ev.to_sse()
                     else:
                         if self.current_block_type != "text":
                             if self.current_block_type is not None:
-                                stop_ev = ModelConverter.build_sse_block_stop(self._get_current_index())
-                                yield stop_ev.to_sse()
+                                yield AnthropicSSEFormatter.block_stop(self._get_current_index())
                             idx = self._next_block_index()
-                            start_ev = ModelConverter.build_sse_block_start(idx, "text")
+                            yield AnthropicSSEFormatter.text_start(idx)
                             self.current_block_type = "text"
-                            yield start_ev.to_sse()
 
                         self.accumulated_text.append(content)
-                        delta_ev = ModelConverter.build_sse_block_delta(
-                            self._get_current_index(), "text_delta", content
-                        )
-                        yield delta_ev.to_sse()
+                        if content.strip() or content == " ":
+                            self.text_or_tool_emitted = True
+                        yield AnthropicSSEFormatter.text_delta(content, self._get_current_index())
 
-        # Flush Atomic Parsers
+        # Flush Thinking Parser
         for flush_ev in await self.thinking_parser.flush():
+            if hasattr(flush_ev, "delta"):
+                dtype = getattr(flush_ev.delta, "type", None)
+                if dtype == "thinking_delta":
+                    self.accumulated_thinking.append(getattr(flush_ev.delta, "thinking", ""))
+                elif dtype == "text_delta":
+                    text_val = getattr(flush_ev.delta, "text", "")
+                    self.accumulated_text.append(text_val)
+                    if text_val:
+                        self.text_or_tool_emitted = True
             yield flush_ev.to_sse()
 
+        # Flush Heuristic Tool Parser
         for flush_ev in await self.heuristic_tool_parser.flush():
+            if hasattr(flush_ev, "content_block") and getattr(flush_ev.content_block, "type", None) == "tool_use":
+                self.text_or_tool_emitted = True
             yield flush_ev.to_sse()
 
+        # Stop active block if open
         if self.current_block_type is not None:
-            stop_ev = ModelConverter.build_sse_block_stop(self._get_current_index())
-            yield stop_ev.to_sse()
+            yield AnthropicSSEFormatter.block_stop(self._get_current_index())
             self.current_block_type = None
 
+        # Finalize active native tool call
         if self.active_tool_id and self.active_tool_name:
             full_args_str = "".join(self.accumulated_tool_args)
             parsed_args = safe_parse_json(full_args_str) or {}
@@ -401,7 +428,9 @@ class StreamEngine:
                     "input": parsed_args,
                 }
             )
+            self.text_or_tool_emitted = True
 
+        # Extract embedded JSON tool calls from accumulated text if no native tool calls were present
         if not self.accumulated_tool_calls:
             full_streamed_text = "".join(self.accumulated_text)
             _rem, extracted_tools = extract_all_json_tool_calls(full_streamed_text)
@@ -409,11 +438,12 @@ class StreamEngine:
                 for tool in extracted_tools:
                     tool["input"] = await self.subagent_guard.enforce_tool_call(tool["name"], tool.get("input", {}))
                     idx = self._next_block_index()
-                    yield ModelConverter.build_sse_block_start(idx, "tool_use", {"id": tool["id"], "name": tool["name"]}).to_sse()
-                    yield ModelConverter.build_sse_block_delta(idx, "input_json_delta", json.dumps(tool["input"])).to_sse()
-                    yield ModelConverter.build_sse_block_stop(idx).to_sse()
+                    yield AnthropicSSEFormatter.tool_use_start(idx, tool["id"], tool["name"])
+                    yield AnthropicSSEFormatter.input_json_delta(json.dumps(tool["input"]), idx)
+                    yield AnthropicSSEFormatter.block_stop(idx)
                     self.accumulated_tool_calls.append(tool)
                 finish_reason = "tool_calls"
+                self.text_or_tool_emitted = True
 
         if finish_reason == "tool_calls" or self.accumulated_tool_calls:
             stop_reason = "tool_use"
@@ -422,22 +452,43 @@ class StreamEngine:
         else:
             stop_reason = "end_turn"
 
+        # --- ASYNCHRONOUS SAFETY NET (PREEMPTIVE / FALLBACK INJECTION) ---
+        # If no text content and no tool calls were emitted throughout the entire stream,
+        # inject a single space text_delta so Claude Code CLI never crashes with:
+        # "model output must contain either output text or tool calls, these cannot both be empty"
+        if not self.text_or_tool_emitted:
+            idx = self._next_block_index()
+            yield AnthropicSSEFormatter.text_start(idx)
+            yield AnthropicSSEFormatter.text_delta(" ", idx)
+            yield AnthropicSSEFormatter.block_stop(idx)
+            self.text_or_tool_emitted = True
+            self.accumulated_text.append(" ")
+
         self.final_stop_reason = stop_reason
         self.final_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
 
         self.session.record_tokens(input_tokens, output_tokens)
 
-        yield ModelConverter.build_sse_message_delta(stop_reason, output_tokens).to_sse()
-        yield ModelConverter.build_sse_message_stop().to_sse()
+        yield AnthropicSSEFormatter.message_delta(stop_reason=stop_reason, output_tokens=output_tokens)
+        yield AnthropicSSEFormatter.message_stop()
 
-    async def transform(self, upstream_stream: AsyncIterable[dict[str, Any] | str]) -> AsyncGenerator[str, None]:
-        """Backwards compatibility alias for transform()."""
-        async for chunk in self.stream_response(upstream_stream):
+    async def stream_response(
+        self, upstream_stream: AsyncIterable[dict[str, Any] | str | bytes]
+    ) -> AsyncGenerator[str, None]:
+        """Async generator yielding Anthropic SSE event strings on-the-fly."""
+        async for chunk in self.transform_stream(upstream_stream):
             yield chunk
 
+    async def transform(
+        self, upstream_stream: AsyncIterable[dict[str, Any] | str | bytes]
+    ) -> AsyncGenerator[str, None]:
+        """Backwards compatibility alias for transform_stream()."""
+        async for chunk in self.transform_stream(upstream_stream):
+            yield chunk
 
 
 # Aliases for backward compatibility
 StreamTransformer = StreamEngine
 SSEStreamTransformer = StreamEngine
+
 

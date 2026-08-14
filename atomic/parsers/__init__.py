@@ -2,8 +2,11 @@
 
 from atomic.parsers import base, heuristic_tool, thinking
 from atomic.parsers.base import BaseAtomicParser
-from atomic.parsers.heuristic_tool import HeuristicToolParser
-from atomic.parsers.thinking import ThinkingParser
+from atomic.parsers.heuristic_tool import (
+    HeuristicToolParser,
+    HeuristicToolStatefulParser,
+)
+from atomic.parsers.thinking import ThinkingParser, ThinkingStatefulParser
 
 __all__ = [
     "base",
@@ -11,5 +14,8 @@ __all__ = [
     "heuristic_tool",
     "BaseAtomicParser",
     "ThinkingParser",
+    "ThinkingStatefulParser",
     "HeuristicToolParser",
+    "HeuristicToolStatefulParser",
 ]
+

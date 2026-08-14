@@ -145,3 +145,7 @@ class ThinkingParser(BaseAtomicParser):
             self.buffer = ""
         self._close_block(events)
         return events
+
+
+ThinkingStatefulParser = ThinkingParser
+

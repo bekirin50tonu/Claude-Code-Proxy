@@ -111,3 +111,7 @@ class HeuristicToolParser(BaseAtomicParser):
                 events.append(ModelConverter.build_sse_block_stop(t_idx))
             self.text_buffer = ""
         return events
+
+
+HeuristicToolStatefulParser = HeuristicToolParser
+

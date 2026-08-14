@@ -97,37 +97,52 @@
                     <div class="form-grid">
                         <div class="form-group">
                             <div class="label-row">
-                                <label for="MODEL_OPUS">MODEL_OPUS (Opus 5 / 1M Context mapping)</label>
+                                <label for="MODEL">1. Default (recommended) — Opus 5 / Nemotron 70B</label>
+                            </div>
+                            <input type="text" id="MODEL" autocomplete="off" onfocus="handleAutocomplete('MODEL')" onblur="blurAutocomplete('MODEL')">
+                            <div id="MODEL-dropdown" class="autocomplete-dropdown"></div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="MODEL_OPUS">2. Opus (1M context) — Nemotron 70B / Llama 3.3</label>
                             </div>
                             <input type="text" id="MODEL_OPUS" autocomplete="off" onfocus="handleAutocomplete('MODEL_OPUS')" onblur="blurAutocomplete('MODEL_OPUS')">
                             <div id="MODEL_OPUS-dropdown" class="autocomplete-dropdown"></div>
                         </div>
                         <div class="form-group">
                             <div class="label-row">
-                                <label for="MODEL_SONNET">MODEL_SONNET (Sonnet 5 / 1M Context mapping)</label>
+                                <label for="MODEL_SONNET">3. Sonnet — Llama 3.1 70B</label>
                             </div>
                             <input type="text" id="MODEL_SONNET" autocomplete="off" onfocus="handleAutocomplete('MODEL_SONNET')" onblur="blurAutocomplete('MODEL_SONNET')">
                             <div id="MODEL_SONNET-dropdown" class="autocomplete-dropdown"></div>
                         </div>
                         <div class="form-group">
                             <div class="label-row">
-                                <label for="MODEL_HAIKU">MODEL_HAIKU (Haiku 4.5 mapping)</label>
+                                <label for="MODEL_SONNET_1M">4. Sonnet 5 (1M context) — Llama 3.3 70B</label>
+                            </div>
+                            <input type="text" id="MODEL_SONNET_1M" autocomplete="off" onfocus="handleAutocomplete('MODEL_SONNET_1M')" onblur="blurAutocomplete('MODEL_SONNET_1M')">
+                            <div id="MODEL_SONNET_1M-dropdown" class="autocomplete-dropdown"></div>
+                        </div>
+                        <div class="form-group full-width">
+                            <div class="label-row">
+                                <label for="MODEL_HAIKU">5. Haiku — Fastest 8B / Flash</label>
                             </div>
                             <input type="text" id="MODEL_HAIKU" autocomplete="off" onfocus="handleAutocomplete('MODEL_HAIKU')" onblur="blurAutocomplete('MODEL_HAIKU')">
                             <div id="MODEL_HAIKU-dropdown" class="autocomplete-dropdown"></div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="MODEL">MODEL (Global default / Opus 5 fallback)</label>
-                            </div>
-                            <input type="text" id="MODEL" autocomplete="off" onfocus="handleAutocomplete('MODEL')" onblur="blurAutocomplete('MODEL')">
-                            <div id="MODEL-dropdown" class="autocomplete-dropdown"></div>
                         </div>
                         <div class="form-group full-width" style="grid-column: span 2; margin-top: 1rem; border-top: 1px dashed var(--border-subtle); padding-top: 1rem;">
                             <h3 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">Per-Model Thinking Mode Controls (&lt;think&gt; Directive States)</h3>
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
                                 <div>
-                                    <label for="THINKING_MODE_OPUS" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">OPUS 5 THINKING MODE</label>
+                                    <label for="THINKING_MODE_DEFAULT" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">1. DEFAULT THINKING MODE</label>
+                                    <select id="THINKING_MODE_DEFAULT" style="width: 100%; margin-top: 4px;">
+                                        <option value="open">open — Force &lt;think&gt; Reasoning</option>
+                                        <option value="inherit">inherit — Native Model Behavior</option>
+                                        <option value="close">close — Suppress Thinking</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="THINKING_MODE_OPUS" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">2. OPUS THINKING MODE</label>
                                     <select id="THINKING_MODE_OPUS" style="width: 100%; margin-top: 4px;">
                                         <option value="open">open — Force &lt;think&gt; Reasoning</option>
                                         <option value="inherit">inherit — Native Model Behavior</option>
@@ -135,7 +150,7 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label for="THINKING_MODE_SONNET" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">SONNET 5 THINKING MODE</label>
+                                    <label for="THINKING_MODE_SONNET" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">3. SONNET THINKING MODE</label>
                                     <select id="THINKING_MODE_SONNET" style="width: 100%; margin-top: 4px;">
                                         <option value="open">open — Force &lt;think&gt; Reasoning</option>
                                         <option value="inherit">inherit — Native Model Behavior</option>
@@ -143,16 +158,8 @@
                                     </select>
                                 </div>
                                 <div>
-                                    <label for="THINKING_MODE_HAIKU" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">HAIKU 4.5 THINKING MODE</label>
+                                    <label for="THINKING_MODE_HAIKU" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">5. HAIKU THINKING MODE</label>
                                     <select id="THINKING_MODE_HAIKU" style="width: 100%; margin-top: 4px;">
-                                        <option value="open">open — Force &lt;think&gt; Reasoning</option>
-                                        <option value="inherit">inherit — Native Model Behavior</option>
-                                        <option value="close">close — Suppress Thinking</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label for="THINKING_MODE_DEFAULT" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">DEFAULT THINKING MODE</label>
-                                    <select id="THINKING_MODE_DEFAULT" style="width: 100%; margin-top: 4px;">
                                         <option value="open">open — Force &lt;think&gt; Reasoning</option>
                                         <option value="inherit">inherit — Native Model Behavior</option>
                                         <option value="close">close — Suppress Thinking</option>
@@ -165,38 +172,46 @@
                     <!-- Fallback Chains Config -->
                     <div style="margin-top: 2rem; border-top: 1px solid var(--border-subtle); padding-top: 1.5rem;">
                         <h3 style="font-size: 0.95rem; font-weight: 700; color: white; margin-bottom: 0.25rem;">Fallback Order Chains</h3>
-                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1.25rem;">Configure failover model priority list (inline tag chips with autocomplete) used when primary models are unavailable or rate-limited. Press Enter or comma to add a tag.</p>
+                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1.25rem;">Configure failover model priority list (inline tag chips with autocomplete) used when primary models are unavailable or rate-limited. Ordered matching Claude Code CLI options 1 to 5.</p>
                         <div class="form-grid">
                             <div class="form-group full-width">
-                                <label for="FALLBACK_ORDER_CLAUDE_OPUS">Opus 5 Fallback Order</label>
+                                <label for="FALLBACK_ORDER_CLAUDE_DEFAULT">1. Default Fallback Order</label>
+                                <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_DEFAULT" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_DEFAULT')">
+                                    <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_DEFAULT" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_DEFAULT')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')">
+                                </div>
+                                <div id="FALLBACK_ORDER_CLAUDE_DEFAULT-dropdown" class="autocomplete-dropdown"></div>
+                            </div>
+                            <div class="form-group full-width">
+                                <label for="FALLBACK_ORDER_CLAUDE_OPUS">2. Opus (1M context) Fallback Order</label>
                                 <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_OPUS" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_OPUS')">
                                     <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_OPUS" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_OPUS')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_OPUS')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_OPUS')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_OPUS')">
                                 </div>
                                 <div id="FALLBACK_ORDER_CLAUDE_OPUS-dropdown" class="autocomplete-dropdown"></div>
                             </div>
                             <div class="form-group full-width">
-                                <label for="FALLBACK_ORDER_CLAUDE_SONNET">Sonnet 5 Fallback Order</label>
+                                <label for="FALLBACK_ORDER_CLAUDE_SONNET">3. Sonnet Fallback Order</label>
                                 <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_SONNET" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_SONNET')">
                                     <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_SONNET" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_SONNET')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET')">
                                 </div>
                                 <div id="FALLBACK_ORDER_CLAUDE_SONNET-dropdown" class="autocomplete-dropdown"></div>
                             </div>
                             <div class="form-group full-width">
-                                <label for="FALLBACK_ORDER_CLAUDE_HAIKU">Haiku 4.5 Fallback Order</label>
+                                <label for="FALLBACK_ORDER_CLAUDE_SONNET_1M">4. Sonnet 5 (1M context) Fallback Order</label>
+                                <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_SONNET_1M" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_SONNET_1M')">
+                                    <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_SONNET_1M" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET_1M')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET_1M')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_SONNET_1M')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET_1M')">
+                                </div>
+                                <div id="FALLBACK_ORDER_CLAUDE_SONNET_1M-dropdown" class="autocomplete-dropdown"></div>
+                            </div>
+                            <div class="form-group full-width">
+                                <label for="FALLBACK_ORDER_CLAUDE_HAIKU">5. Haiku Fallback Order</label>
                                 <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_HAIKU" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_HAIKU')">
                                     <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_HAIKU" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_HAIKU')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_HAIKU')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_HAIKU')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_HAIKU')">
                                 </div>
                                 <div id="FALLBACK_ORDER_CLAUDE_HAIKU-dropdown" class="autocomplete-dropdown"></div>
                             </div>
-                            <div class="form-group full-width">
-                                <label for="FALLBACK_ORDER_CLAUDE_DEFAULT">Default Fallback Order</label>
-                                <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_DEFAULT" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_DEFAULT')">
-                                    <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_DEFAULT" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_DEFAULT')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')">
-                                </div>
-                                <div id="FALLBACK_ORDER_CLAUDE_DEFAULT-dropdown" class="autocomplete-dropdown"></div>
-                            </div>
                         </div>
                     </div>
+
                 </div><!-- /pane-models -->
 
                 <!-- PANE: ROUTER & FALLBACKS -->
@@ -276,13 +291,15 @@
                                     <th style="padding: 0.75rem 1rem;">Method &amp; Path</th>
                                     <th style="padding: 0.75rem 1rem;">Client Model</th>
                                     <th style="padding: 0.75rem 1rem;">Mapped Upstream Target</th>
+                                    <th style="padding: 0.75rem 1rem;">Tokens (In / Out)</th>
                                     <th style="padding: 0.75rem 1rem;">Latency</th>
                                     <th style="padding: 0.75rem 1rem;">Status</th>
                                     <th style="padding: 0.75rem 1rem; text-align: right;">Dev Action</th>
                                 </tr>
                             </thead>
                             <tbody id="dev-payloads-table-body">
-                                <tr><td colspan="7" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No Claude Code requests captured yet. Send a request to see JSON payloads here.</td></tr>
+                                <tr><td colspan="8" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No Claude Code requests captured yet. Send a request to see JSON payloads here.</td></tr>
+
                             </tbody>
                         </table>
                     </div>

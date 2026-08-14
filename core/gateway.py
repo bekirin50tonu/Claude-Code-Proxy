@@ -10,12 +10,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from loguru import logger
 
 from api.mock import check_mock_request
+from atomic.guards.nim_guard import nim_throttle_guard
 from atomic.guards.stream_guard import guarded
 from atomic.guards.token_budget import TokenBudgetGuard
 from config import settings, stats
 from core.router.selector import AllModelsUnavailableError, model_selector
 from core.transformer.stream_engine import StreamEngine, translate_non_stream_response
 from providers.openai import OpenAICompatibleProvider
+from shared.exceptions import NimQueueTimeoutError
 
 model_router = model_selector
 router = APIRouter()
@@ -318,8 +320,16 @@ async def messages_endpoint(request: Request) -> Any:
         clamped_max_tokens = token_guard.clamp_max_tokens(max_tokens)
         clamped_temp = min(temperature, 0.6) if "llama" in mapped_model.lower() else temperature
 
+        is_nim = mapped_model.startswith("nvidia_nim/")
+        nim_cm = nim_throttle_guard.acquire(mapped_model) if is_nim else None
+        nim_acquired = False
+
         stats.active_concurrency += 1
         try:
+            if nim_cm:
+                await nim_cm.__aenter__()
+                nim_acquired = True
+
             async with concurrency_semaphore:
                 upstream_res = await _get_provider().complete(
                     model=mapped_model,
@@ -340,10 +350,14 @@ async def messages_endpoint(request: Request) -> Any:
                         stream_timeout=settings.HTTP_READ_TIMEOUT,
                     )
 
+                    active_nim_cm = nim_cm if nim_acquired else None
+                    nim_acquired = False  # Ownership passed to generator finally block
+
                     async def _record_after_stream(
                         target_stream=guarded_stream,
                         target_model=mapped_model,
                         target_engine=engine,
+                        nim_ctx=active_nim_cm,
                     ) -> AsyncGenerator[str, None]:
                         try:
                             async for chunk in target_stream:
@@ -358,6 +372,8 @@ async def messages_endpoint(request: Request) -> Any:
                             )
                             logger.error("Stream error for '%s': %s", target_model, exc)
                         finally:
+                            if nim_ctx:
+                                await nim_ctx.__aexit__(None, None, None)
                             record_request_log(
                                 "POST",
                                 "/v1/messages",
@@ -401,6 +417,19 @@ async def messages_endpoint(request: Request) -> Any:
                     )
                     return JSONResponse(content=translated)
 
+        except NimQueueTimeoutError as exc:
+            last_error = exc
+            tried_models.append(mapped_model)
+            stats.error_count += 1
+            logger.warning(
+                "NVIDIA NIM queue timeout for model '%s': %s. Redirecting request to next fallback model.",
+                mapped_model,
+                exc,
+            )
+            await model_selector.record_outcome(
+                mapped_model, success=False, headers={}, reason="NVIDIA NIM Queue Timeout (>30s)"
+            )
+            continue
         except Exception as e:
             last_error = e
             tried_models.append(mapped_model)
@@ -426,6 +455,8 @@ async def messages_endpoint(request: Request) -> Any:
             logger.warning("Model '%s' failed (%s). Retrying next fallback model...", mapped_model, failure_reason)
             continue
         finally:
+            if nim_acquired and nim_cm:
+                await nim_cm.__aexit__(None, None, None)
             stats.active_concurrency -= 1
 
     stats.error_count += 1

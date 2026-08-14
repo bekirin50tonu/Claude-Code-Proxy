@@ -100,3 +100,73 @@ async def test_stream_transformer_end_to_end() -> None:
     summary = engine.get_summary_response()
     assert summary["model"] == "claude-3-5-sonnet"
     assert len(summary["content"]) >= 2
+
+
+def test_anthropic_sse_formatter() -> None:
+    """Test AnthropicSSEFormatter stateless static helper class."""
+    from shared.utils.sse_helper import AnthropicSSEFormatter
+
+    msg_start = AnthropicSSEFormatter.message_start("msg_test", "claude-3-5-sonnet")
+    assert "event: message_start" in msg_start
+    assert '"id": "msg_test"' in msg_start
+
+    txt_start = AnthropicSSEFormatter.text_start(1)
+    assert "event: content_block_start" in txt_start
+    assert '"type": "text"' in txt_start
+
+    txt_delta = AnthropicSSEFormatter.text_delta("Hello world", 1)
+    assert "event: content_block_delta" in txt_delta
+    assert '"text": "Hello world"' in txt_delta
+
+    think_delta = AnthropicSSEFormatter.thinking_delta("Reasoning...", 0)
+    assert "event: content_block_delta" in think_delta
+    assert '"thinking": "Reasoning..."' in think_delta
+
+    blk_stop = AnthropicSSEFormatter.block_stop(1)
+    assert "event: content_block_stop" in blk_stop
+
+    msg_stop = AnthropicSSEFormatter.message_stop()
+    assert "event: message_stop" in msg_stop
+
+
+@pytest.mark.asyncio
+async def test_stream_transformer_thinking_only_fallback_safety_net() -> None:
+    """Test safety net when model yields ONLY thinking (no text/tools), ensuring fallback text delta space is injected."""
+    engine = StreamEngine(target_model="claude-3-5-sonnet", session_id="test_safety_net_1")
+
+    async def mock_thinking_only_chunks():
+        yield {"choices": [{"delta": {"reasoning_content": "Deep thinking process without text..."}}]}
+        yield {"choices": [{"finish_reason": "stop"}]}
+
+    events = []
+    async for sse_str in engine.transform_stream(mock_thinking_only_chunks()):
+        events.append(sse_str)
+
+    full_sse = "".join(events)
+    assert "event: message_start" in full_sse
+    assert "thinking_delta" in full_sse
+    # Crucial assertion: safety net injects text_delta with space " " so message is not empty
+    assert "text_delta" in full_sse
+    assert "event: message_stop" in full_sse
+    assert engine.text_or_tool_emitted is True
+
+
+@pytest.mark.asyncio
+async def test_stream_transformer_empty_stream_fallback_safety_net() -> None:
+    """Test safety net when stream is completely empty (0 chunks)."""
+    engine = StreamEngine(target_model="claude-3-5-sonnet", session_id="test_safety_net_2")
+
+    async def empty_chunks():
+        if False:
+            yield {}
+
+    events = []
+    async for sse_str in engine.transform_stream(empty_chunks()):
+        events.append(sse_str)
+
+    full_sse = "".join(events)
+    assert "event: message_start" in full_sse
+    assert "text_delta" in full_sse
+    assert "event: message_stop" in full_sse
+    assert engine.text_or_tool_emitted is True
+
