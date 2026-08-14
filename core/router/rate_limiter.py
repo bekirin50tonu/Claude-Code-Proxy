@@ -1,38 +1,24 @@
-"""
-Rate Limit Parser — reads upstream x-ratelimit-* HTTP response headers
-and maintains per-model rate limit state.
-
-Supported header formats (NVIDIA NIM & OpenRouter both use this schema):
-  x-ratelimit-limit-requests      → rpm_limit (requests per minute)
-  x-ratelimit-remaining-requests  → remaining requests in current window
-  x-ratelimit-limit-tokens        → tpm_limit (tokens per minute)
-  x-ratelimit-remaining-tokens    → remaining tokens in current window
-  x-ratelimit-reset-requests      → ISO-8601 or seconds until reset
-  x-ratelimit-reset-tokens        → ISO-8601 or seconds until reset
-
-Headroom policy:
-  A model is considered to have headroom when remaining ≥ 10% of limit.
-  If the header is absent (provider doesn't send it), headroom = True.
-"""
+"""Dynamic Rate Limiter and header parser in Core layer."""
 
 import time
 
+from models import RateLimitStatus
+
 
 class RateLimitState:
-    # Fraction of capacity that must remain for "headroom" to be True
+    """State of rate limits for a specific model_id."""
+
     HEADROOM_FRACTION = 0.10
 
     def __init__(self, model_id: str) -> None:
         self.model_id = model_id
-
         self.req_limit: int | None = None
         self.req_remaining: int | None = None
-        self.req_reset_at: float | None = None  # monotonic time
+        self.req_reset_at: float | None = None
 
         self.tok_limit: int | None = None
         self.tok_remaining: int | None = None
         self.tok_reset_at: float | None = None
-
         self._last_updated: float = 0.0
 
     def update(self, headers: dict[str, str]) -> None:
@@ -54,9 +40,8 @@ class RateLimitState:
             if val is None:
                 return None
             try:
-                # Value can be seconds (e.g. "60") or ms (e.g. "60000")
                 secs = float(val)
-                if secs > 1_000_000:  # looks like milliseconds
+                if secs > 1_000_000:
                     secs = secs / 1000.0
                 return now + secs
             except (ValueError, TypeError):
@@ -85,8 +70,6 @@ class RateLimitState:
     def has_headroom(self) -> bool:
         """Return True if the model has sufficient remaining quota."""
         now = time.monotonic()
-
-        # If reset time has passed, assume quota is restored
         if self.req_reset_at and now >= self.req_reset_at:
             self.req_remaining = self.req_limit
             self.req_reset_at = None
@@ -97,32 +80,32 @@ class RateLimitState:
         req_low = (
             self.req_limit is not None
             and self.req_remaining is not None
-            and self.req_remaining
-            < max(1, int(self.req_limit * self.HEADROOM_FRACTION))
+            and self.req_remaining < max(1, int(self.req_limit * self.HEADROOM_FRACTION))
         )
         tok_low = (
             self.tok_limit is not None
             and self.tok_remaining is not None
-            and self.tok_remaining
-            < max(100, int(self.tok_limit * self.HEADROOM_FRACTION))
+            and self.tok_remaining < max(100, int(self.tok_limit * self.HEADROOM_FRACTION))
         )
         return not req_low and not tok_low
 
+    def to_status(self) -> RateLimitStatus:
+        return RateLimitStatus(
+            model_id=self.model_id,
+            req_limit=self.req_limit,
+            req_remaining=self.req_remaining,
+            tok_limit=self.tok_limit,
+            tok_remaining=self.tok_remaining,
+            has_headroom=self.has_headroom(),
+            last_updated_ago_s=round(time.monotonic() - self._last_updated, 1) if self._last_updated else None,
+        )
+
     def status_dict(self) -> dict[str, object]:
-        return {
-            "req_limit": self.req_limit,
-            "req_remaining": self.req_remaining,
-            "tok_limit": self.tok_limit,
-            "tok_remaining": self.tok_remaining,
-            "has_headroom": self.has_headroom(),
-            "last_updated_ago_s": round(time.monotonic() - self._last_updated, 1)
-            if self._last_updated
-            else None,
-        }
+        return self.to_status().to_dict()
 
 
-class RateLimitParser:
-    """Registry of per-model RateLimitState instances."""
+class DynamicRateLimiter:
+    """Dynamic rate limit parser and registry of per-model RateLimitState instances."""
 
     def __init__(self) -> None:
         self._states: dict[str, RateLimitState] = {}
@@ -142,5 +125,5 @@ class RateLimitParser:
         return {mid: state.status_dict() for mid, state in self._states.items()}
 
 
-# Module-level singleton
-rate_limit_parser = RateLimitParser()
+rate_limit_parser = DynamicRateLimiter()
+rate_limiter = rate_limit_parser

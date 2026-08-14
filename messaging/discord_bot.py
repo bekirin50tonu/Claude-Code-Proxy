@@ -1,14 +1,12 @@
 import asyncio
-import logging
 import os
 import subprocess
 from typing import Any
 
 import discord
+from loguru import logger
 
 from config import settings
-
-logger = logging.getLogger("proxy_discord")
 
 
 class ProxyDiscordBot(discord.Client):

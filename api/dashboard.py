@@ -1,42 +1,98 @@
 import asyncio
-import logging
 import os
 from pathlib import Path
 from typing import Any
 
 import httpx
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+from loguru import logger
 from pydantic import BaseModel
 
 from config import settings, stats
-from router.model_router import model_router
+from core.router.selector import model_selector as model_router
 
 router = APIRouter()
-logger = logging.getLogger("proxy_dashboard")
 
 # Fallback models in case API calls fail or keys are missing
 FALLBACK_MODELS = {
     "nvidia_nim": [
         "nvidia/llama-3.1-nemotron-70b-instruct",
+        "nvidia/nemotron-4-340b-instruct",
         "meta/llama-3.1-405b-instruct",
         "meta/llama-3.1-70b-instruct",
-        "z-ai/glm4.7",
+        "meta/llama-3.1-8b-instruct",
+        "meta/llama-3.3-70b-instruct",
+        "z-ai/glm-5.2",
         "mistralai/mixtral-8x22b-instruct-v0.1",
     ],
     "open_router": [
-        "arcee-ai/trinity-large-preview:free",
         "google/gemini-2.5-flash:free",
-        "meta-llama/llama-3-8b-instruct:free",
+        "google/gemini-2.5-pro",
+        "meta-llama/llama-3.3-70b-instruct",
+        "meta-llama/llama-3.3-70b-instruct:free",
         "deepseek/deepseek-chat",
+        "deepseek/deepseek-r1",
+        "arcee-ai/trinity-large-preview:free",
         "qwen/qwen-2.5-72b-instruct",
         "mistralai/pixtral-12b:free",
+        "stepfun/step-3.5-flash:free",
+    ],
+    "gemini": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+    ],
+    "groq": [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it",
+        "deepseek-r1-distill-llama-70b",
+    ],
+    "deepseek": [
+        "deepseek-chat",
+        "deepseek-coder",
+        "deepseek-reasoner",
+    ],
+    "mistral": [
+        "mistral-large-latest",
+        "mistral-medium-latest",
+        "mistral-small-latest",
+        "codestral-latest",
+        "pixtral-large-latest",
+    ],
+    "cerebras": [
+        "llama3.3-70b",
+        "llama3.1-8b",
+    ],
+    "fireworks": [
+        "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        "accounts/fireworks/models/deepseek-v3",
+        "accounts/fireworks/models/deepseek-r1",
+        "accounts/fireworks/models/qwen2p5-72b-instruct",
+    ],
+    "kimi": [
+        "moonshot-v1-8k",
+        "moonshot-v1-32k",
+        "moonshot-v1-128k",
     ],
     "lmstudio": [
         "qwen2.5-7b-instruct",
         "llama-3.2-3b-instruct",
         "phi-3-mini-4k-instruct",
         "mistral-7b-instruct",
+    ],
+    "ollama": [
+        "llama3.3",
+        "llama3.1:70b",
+        "qwen2.5-coder",
+        "deepseek-r1",
+    ],
+    "llama_cpp": [
+        "local-model",
     ],
 }
 
@@ -76,7 +132,7 @@ def get_env_file_keys() -> set[str]:
 
 
 def get_key_statuses() -> dict[str, str]:
-    """Resolve Configured / Locked / Not Configured state badges for each setting."""
+    """Resolve Set / Env Locked / Not Set state badges for each setting."""
     env_keys = get_env_file_keys()
     statuses = {}
     managed_keys = [
@@ -103,33 +159,29 @@ def get_key_statuses() -> dict[str, str]:
         "FIREWORKS_BASE_URL",
         "MODEL_OPUS",
         "MODEL_SONNET",
+        "MODEL_SONNET_1M",
         "MODEL_HAIKU",
         "MODEL",
+        "REFRESH_TIME",
     ]
+
+    from config import PROVIDER_DEFAULTS
+    for p in PROVIDER_DEFAULTS:
+        for field_name in ["rpm", "tpm", "rpd", "rate_window", "max_concurrency", "context", "max_output", "http_read_timeout", "http_write_timeout", "http_connect_timeout"]:
+            managed_keys.append(f"PROVIDER_{p.upper()}_{field_name.upper()}")
+
     for k in managed_keys:
         val_in_env = k in env_keys
         val_in_os = k in os.environ and bool(os.environ[k].strip())
 
-        # Determine if it's currently an active engine model
-        is_active_engine = False
-        active_model = settings.MODEL.split("/")[0] if "/" in settings.MODEL else ""
-        if active_model and (
-            active_model == "nvidia_nim"
-            and k in ["NVIDIA_NIM_API_KEY", "MODEL_OPUS"]
-            or active_model == "open_router"
-            and k in ["OPENROUTER_API_KEY", "MODEL_SONNET"]
-        ):
-            is_active_engine = True
-
-        if is_active_engine:
-            statuses[k] = "Active Engine"
-        elif not val_in_env and val_in_os:
-            statuses[k] = "Locked"
+        if not val_in_env and val_in_os:
+            statuses[k] = "Env Locked"
         elif val_in_env or val_in_os:
-            statuses[k] = "Configured"
+            statuses[k] = "Set"
         else:
-            statuses[k] = "Not Configured"
+            statuses[k] = "Not Set"
     return statuses
+
 
 
 def save_env_values(configs: dict[str, Any]) -> None:
@@ -199,43 +251,56 @@ async def check_endpoint_online(url: str) -> str:
         pass
     return "Offline"
 
+STATIC_DIR = Path(__file__).parent.parent / "static"
+
+
+@router.get("/dashboard", response_class=FileResponse)
+async def get_dashboard_ui() -> FileResponse:
+    """Serve the static Hermes Gate dashboard HTML page."""
+    html_file = STATIC_DIR / "dashboard.html"
+    return FileResponse(html_file, media_type="text/html")
+
 
 @router.get("/api/models")
 async def get_available_models() -> JSONResponse:
-    """Fetch and aggregate models across openrouter and nvidia nim only (LM Studio skipped if offline)."""
-    nim_key = settings.NVIDIA_NIM_API_KEY
-    or_key = settings.OPENROUTER_API_KEY
+    """Fetch and aggregate models across all supported providers dynamically."""
+    providers_config = [
+        ("open_router", f"{settings.OPENROUTER_BASE_URL.rstrip('/')}/models", settings.OPENROUTER_API_KEY),
+        ("nvidia_nim", f"{settings.NVIDIA_NIM_BASE_URL.rstrip('/')}/models", settings.NVIDIA_NIM_API_KEY),
+        ("gemini", f"{settings.GEMINI_BASE_URL.rstrip('/')}/openai/models", settings.GEMINI_API_KEY),
+        ("groq", f"{settings.GROQ_BASE_URL.rstrip('/')}/models", settings.GROQ_API_KEY),
+        ("deepseek", f"{settings.DEEPSEEK_BASE_URL.rstrip('/')}/models", settings.DEEPSEEK_API_KEY),
+        ("mistral", f"{settings.MISTRAL_BASE_URL.rstrip('/')}/models", settings.MISTRAL_API_KEY),
+        ("cerebras", f"{settings.CEREBRAS_BASE_URL.rstrip('/')}/models", settings.CEREBRAS_API_KEY),
+        ("fireworks", f"{settings.FIREWORKS_BASE_URL.rstrip('/')}/models", settings.FIREWORKS_API_KEY),
+        ("kimi", "https://api.moonshot.cn/v1/models", settings.KIMI_API_KEY),
+        ("lmstudio", f"{settings.LM_STUDIO_BASE_URL.rstrip('/')}/models", None),
+        ("ollama", f"{settings.OLLAMA_BASE_URL.rstrip('/')}/v1/models", None),
+        ("llama_cpp", f"{settings.LLAMA_CPP_BASE_URL.rstrip('/')}/models", None),
+    ]
 
     tasks = []
+    keys_order = []
 
-    if or_key:
-        tasks.append(
-            fetch_models_from_url(
-                "https://openrouter.ai/api/v1/models",
-                headers={"Authorization": f"Bearer {or_key}"},
-            )
-        )
-    else:
-        tasks.append(asyncio.to_thread(list))
-
-    if nim_key:
-        tasks.append(
-            fetch_models_from_url(
-                "https://integrate.api.nvidia.com/v1/models",
-                headers={"Authorization": f"Bearer {nim_key}"},
-            )
-        )
-    else:
-        tasks.append(asyncio.to_thread(list))
+    for name, url, api_key in providers_config:
+        keys_order.append(name)
+        if api_key:
+            tasks.append(fetch_models_from_url(url, headers={"Authorization": f"Bearer {api_key}"}))
+        elif api_key is None and url:
+            # Local endpoints (LM Studio, Ollama, Llama.cpp) require no key
+            tasks.append(fetch_models_from_url(url))
+        else:
+            tasks.append(asyncio.to_thread(list))
 
     results = await asyncio.gather(*tasks)
 
-    models = {
-        "open_router": results[0] if results[0] else FALLBACK_MODELS["open_router"],
-        "nvidia_nim": results[1] if results[1] else FALLBACK_MODELS["nvidia_nim"],
-    }
+    models = {}
+    for idx, name in enumerate(keys_order):
+        fetched = results[idx]
+        models[name] = fetched if fetched else FALLBACK_MODELS.get(name, [])
 
     return JSONResponse(content=models)
+
 
 
 @router.get("/api/config")
@@ -267,8 +332,11 @@ async def get_config() -> JSONResponse:
         "FIREWORKS_BASE_URL": settings.FIREWORKS_BASE_URL,
         "MODEL_OPUS": settings.MODEL_OPUS,
         "MODEL_SONNET": settings.MODEL_SONNET,
+        "MODEL_SONNET_1M": getattr(settings, "MODEL_SONNET_1M", ""),
         "MODEL_HAIKU": settings.MODEL_HAIKU,
         "MODEL": settings.MODEL,
+
+        "REFRESH_TIME": settings.REFRESH_TIME,
         "PROVIDER_RATE_LIMIT": settings.PROVIDER_RATE_LIMIT,
         "PROVIDER_RATE_WINDOW": settings.PROVIDER_RATE_WINDOW,
         "PROVIDER_MAX_CONCURRENCY": settings.PROVIDER_MAX_CONCURRENCY,
@@ -294,6 +362,13 @@ async def get_config() -> JSONResponse:
         "THINKING_MODE_HAIKU": settings.THINKING_MODE_HAIKU,
         "THINKING_MODE_DEFAULT": settings.THINKING_MODE_DEFAULT,
     }
+
+    from config import PROVIDER_DEFAULTS
+    for p in PROVIDER_DEFAULTS:
+        p_cfg = settings.get_provider_config(p)
+        for field_name, val in p_cfg.items():
+            k = f"PROVIDER_{p.upper()}_{field_name.upper()}"
+            config_data[k] = getattr(settings, k, val)
 
     fallbacks_data = {}
     for alias, entry in model_registry._entries.items():
@@ -331,8 +406,23 @@ async def save_config(req: ConfigSaveRequest) -> JSONResponse:
                     fb_list = val
                 else:
                     fb_list = []
-                fallback_updates[alias] = {"fallback_order": fb_list}
+                if alias not in fallback_updates:
+                    fallback_updates[alias] = {}
+                fallback_updates[alias]["fallback_order"] = fb_list
                 continue
+
+            if key in ("MODEL_OPUS", "MODEL_SONNET", "MODEL_SONNET_1M", "MODEL_HAIKU", "MODEL"):
+                alias_map = {
+                    "MODEL_OPUS": "claude_opus",
+                    "MODEL_SONNET": "claude_sonnet",
+                    "MODEL_SONNET_1M": "claude_sonnet_1m",
+                    "MODEL_HAIKU": "claude_haiku",
+                    "MODEL": "claude_default",
+                }
+                alias = alias_map[key]
+                if alias not in fallback_updates:
+                    fallback_updates[alias] = {}
+                fallback_updates[alias]["primary"] = str(val).strip()
 
             if statuses.get(key) == "Locked":
                 # Skip saving locked env variables to .env
@@ -345,6 +435,7 @@ async def save_config(req: ConfigSaveRequest) -> JSONResponse:
 
         settings.reload()
         model_registry.reload()
+
         return JSONResponse(
             content={
                 "status": "success",
@@ -384,15 +475,64 @@ async def get_stats() -> JSONResponse:
                 "llama_cpp": llama_status,
                 "ollama": ollama_status,
             },
-            "recent_requests": stats.recent_requests,
+            "recent_requests": stats.get_recent_dicts(include_payload=False),
             "router_status": router_status,
         }
     )
 
 
+class CircuitBreakerActionRequest(BaseModel):
+    model_id: str
+    action: str  # "reset" (enable/open traffic) or "trip" (block/close traffic)
+
+
+@router.post("/api/circuit-breaker/action")
+async def handle_circuit_breaker_action(req: CircuitBreakerActionRequest) -> JSONResponse:
+    """Manually trip or reset a model's circuit breaker from Dashboard."""
+    from core.router.circuit_breaker import circuit_breaker_registry
+
+    if not req.model_id:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "model_id is required"},
+        )
+
+    cb = circuit_breaker_registry.get(req.model_id)
+
+    action_lower = req.action.lower().strip()
+    if action_lower in ("reset", "open_traffic", "enable", "clear", "open"):
+        # User requested to clear timeout & reset circuit breaker to working/CLOSED state
+        cb.reset()
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": f"Circuit breaker for '{req.model_id}' reset to CLOSED (Healthy). Timeout cleared.",
+                "circuit_breaker": cb.status_dict(),
+            }
+        )
+    elif action_lower in ("trip", "block", "close_traffic", "disable", "close"):
+        # User requested to block model / force circuit breaker to OPEN state (extending timeout 1m -> 5m -> 10m -> 15m -> 30m -> 60m)
+        new_timeout = cb.trip_or_extend(reason="Manually blocked via Dashboard")
+        mins = int(new_timeout // 60)
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": f"Circuit breaker for '{req.model_id}' forced OPEN (Blocked) for {mins} min timeout.",
+                "circuit_breaker": cb.status_dict(),
+            }
+        )
+    else:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": f"Invalid action '{req.action}'. Expected 'reset' or 'trip'."},
+        )
+
+
 @router.get("/api/router-status")
 async def get_router_status() -> JSONResponse:
-    """Per-model circuit breaker and rate limit status."""
+    """Per-model circuit breaker, rate limit status, and client request resolution mappings."""
+    from config import model_registry
+
     status_data = model_router.get_status()
 
     # Compute summary
@@ -401,50 +541,104 @@ async def get_router_status() -> JSONResponse:
         for v in status_data.values()
         if isinstance(v, dict) and v.get("circuit_breaker", {}).get("state") == "open"
     )
-    total = len(status_data)
-    healthy = total - open_count
+    healthy_count = len(status_data) - open_count
 
+    # Build resolution mappings matrix matching Claude Code CLI menu (1 to 5)
+    client_models = [
+        ("claude_default", "1. DEFAULT (RECOMMENDED)", "Default Model (Opus 5 / Nemotron 70B)"),
+        ("claude_opus", "2. OPUS (1M CONTEXT)", "Opus 5 (1M context)"),
+        ("claude_sonnet", "3. SONNET", "Sonnet (Llama 3.1 70B)"),
+        ("claude_sonnet_1m", "4. SONNET 5 (1M CONTEXT)", "Sonnet 5 (1M context)"),
+        ("claude_haiku", "5. HAIKU", "Haiku 4.5 (Llama 3.1 8B)"),
+    ]
+    mappings_matrix = []
+    for c_model, label, desc in client_models:
+        primary = model_registry.get_primary(c_model)
+        fallbacks = model_registry.get_fallbacks(c_model)
+        all_chain = [c for c in ([primary] + fallbacks) if c]
+
+        resolved = "ALL_UNAVAILABLE"
+        is_fallback = False
+        step_name = "NONE"
+
+        for idx, cand in enumerate(all_chain):
+            if model_router._is_available(cand):
+                resolved = cand
+                is_fallback = idx > 0
+                step_name = "PRIMARY DIRECT" if idx == 0 else f"FALLBACK #{idx}"
+                break
+
+        mappings_matrix.append(
+            {
+                "client_model": c_model,
+                "label": label,
+                "description": desc,
+                "primary": primary,
+                "resolved_target": resolved,
+                "is_fallback": is_fallback,
+                "step_name": step_name,
+                "chain": all_chain,
+            }
+        )
+
+
+    from core.router.daily_tracker import daily_request_tracker
     return JSONResponse(
         content={
             "summary": {
-                "total_models": total,
-                "healthy": healthy,
+                "total_models": len(status_data),
+                "healthy": healthy_count,
                 "circuit_open": open_count,
             },
+            "client_mappings": mappings_matrix,
             "models": status_data,
+            "daily_rpd": daily_request_tracker.all_statuses(),
         }
     )
 
 
+@router.get("/api/doctor")
 @router.get("/api/diagnostics")
-async def get_diagnostics() -> JSONResponse:
-    """Run diagnostics self-check connection targets and return logs report."""
+async def run_doctor_checks() -> JSONResponse:
+    """Run full proxy diagnostic health check."""
     reports = []
     has_errors = False
 
-    reports.append("[Telemetry] Initializing Diagnostic System Check...")
-    reports.append(
-        f"• NVIDIA NIM key state: {'ACTIVE' if settings.NVIDIA_NIM_API_KEY else 'ABSENT'}"
-    )
-    reports.append(
-        f"• OpenRouter key state: {'ACTIVE' if settings.OPENROUTER_API_KEY else 'ABSENT'}"
-    )
+    reports.append("[Doctor] Initializing proxy gateway diagnostics...")
+    reports.append("[Doctor] Checking API Keys & Providers...")
 
-    lm_url = settings.LM_STUDIO_BASE_URL.rstrip("/")
-    reports.append(f"[Telemetry] Pinging local endpoints: {lm_url}")
-    try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            resp = await client.get(f"{lm_url}/models")
-            if resp.status_code == 200:
-                reports.append("✅ [Connection Success] LM Studio responsive.")
-            else:
-                reports.append(
-                    f"❌ [Connection Alert] LM Studio returned code {resp.status_code}"
-                )
-                has_errors = True
-    except Exception as e:
-        reports.append(f"❌ [Connection Alert] Failed to connect: {e}")
-        has_errors = True
+    for key_name in ["MODEL_OPUS", "MODEL_SONNET", "MODEL_HAIKU"]:
+        val = getattr(settings, key_name, "")
+        if val:
+            reports.append(f"  ├─ {key_name}: Set ({val})")
+        else:
+            reports.append(f"  ├─ {key_name}: NOT SET (Warning)")
+
+    if settings.OPENROUTER_API_KEY:
+        reports.append("  ├─ OPENROUTER_API_KEY: Present")
+    else:
+        reports.append("  ├─ OPENROUTER_API_KEY: Missing (Warning)")
+
+    if settings.NVIDIA_NIM_API_KEY:
+        reports.append("  ├─ NVIDIA_NIM_API_KEY: Present")
+    else:
+        reports.append("  ├─ NVIDIA_NIM_API_KEY: Missing (Warning)")
+
+    if settings.DEEPSEEK_API_KEY:
+        reports.append("  ├─ DEEPSEEK_API_KEY: Present")
+
+    reports.append("[Doctor] Checking Upstream Endpoints & Circuits...")
+    status_data = model_router.get_status()
+    for model_id, m_status in status_data.items():
+        cb_state = m_status.get("circuit_breaker", {}).get("state")
+        rl_headroom = m_status.get("rate_limit", {}).get("has_headroom")
+        if cb_state == "open":
+            has_errors = True
+            reports.append(f"  ├─ ❌ {model_id}: CIRCUIT OPEN (Failures)")
+        elif not rl_headroom:
+            reports.append(f"  ├─ ⚠️ {model_id}: Rate limit headroom tight (<10%)")
+        else:
+            reports.append(f"  ├─ ✅ {model_id}: Healthy & Operational")
 
     reports.append("[Telemetry] System Model Mappings:")
     reports.append(f"  └─ OPUS:   {settings.MODEL_OPUS}")
@@ -454,2051 +648,31 @@ async def get_diagnostics() -> JSONResponse:
     return JSONResponse(content={"logs": reports, "has_errors": has_errors})
 
 
-@router.get("/dashboard", response_class=HTMLResponse)
-async def get_dashboard_ui() -> HTMLResponse:
-    """Render a clean grayscale, minimal, and focused Hermes Agent style UI."""
-    html_content = """<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hermes Gate - Claude Code Proxy Control Console</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --void-bg: #060709;
-            --carbon-base: #0c0d11;
-            --carbon-card: #0c0d11;
-            --border-subtle: rgba(255, 255, 255, 0.07);
-            --border-focus: rgba(255, 255, 255, 0.35);
-            --text-main: #e5e7eb;
-            --text-muted: #9ca3af;
-            --text-dim: #4b5563;
-            --surface-hover: rgba(255, 255, 255, 0.03);
-            --bg-active: #ffffff;
-            --text-active: #000000;
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
-
-        body {
-            background-color: var(--void-bg);
-            color: var(--text-main);
-            font-family: 'Inter', sans-serif;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow-x: hidden;
-        }
-
-        /* Top Navigation Header */
-        header {
-            border-bottom: 1px solid var(--border-subtle);
-            padding: 1.25rem 3rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: var(--void-bg);
-            z-index: 100;
-        }
-
-        .brand h1 {
-            font-weight: 800;
-            font-size: 1.25rem;
-            letter-spacing: -0.5px;
-            color: #ffffff;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .brand p {
-            font-size: 0.65rem;
-            color: var(--text-dim);
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            margin-top: 2px;
-            font-weight: 600;
-        }
-
-        .header-links {
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-        }
-
-        .header-link {
-            color: var(--text-muted);
-            text-decoration: none;
-            font-size: 0.7rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border: 1px solid var(--border-subtle);
-            padding: 6px 12px;
-            border-radius: 6px;
-            transition: all 0.2s;
-        }
-
-        .header-link:hover {
-            color: #ffffff;
-            border-color: var(--text-muted);
-            background: var(--surface-hover);
-        }
-
-        /* Real-time Telemetry Grid */
-        .live-dials-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 1.25rem;
-            padding: 2rem 3rem 0 3rem;
-            max-width: 1600px;
-            width: 100%;
-            margin: 0 auto;
-        }
-
-        .dial-card {
-            background: var(--carbon-card);
-            border: 1px solid var(--border-subtle);
-            border-radius: 12px;
-            padding: 1.25rem;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            position: relative;
-        }
-
-        .dial-card h3 {
-            font-size: 0.65rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--text-dim);
-            margin-bottom: 0.5rem;
-        }
-
-        .dial-val {
-            font-size: 1.5rem;
-            font-weight: 800;
-            color: white;
-            font-family: 'JetBrains Mono', monospace;
-            display: flex;
-            align-items: baseline;
-            gap: 6px;
-        }
-
-        .dial-val span {
-            font-size: 0.8rem;
-            color: var(--text-dim);
-            font-weight: 400;
-        }
-
-        .dial-badge {
-            position: absolute;
-            top: 1.25rem;
-            right: 1.25rem;
-            font-size: 0.65rem;
-            font-weight: 800;
-            padding: 2px 8px;
-            border-radius: 4px;
-            border: 1px solid var(--border-subtle);
-            color: var(--text-muted);
-        }
-
-        .status-text {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.8rem;
-            font-weight: 700;
-        }
-
-        /* Main Workspace Container */
-        main {
-            display: flex;
-            flex: 1;
-            padding: 2rem 3rem;
-            gap: 2rem;
-            max-width: 1600px;
-            margin: 0 auto;
-            width: 100%;
-        }
-
-        /* Left Side Controls Panel */
-        .control-sidebar {
-            width: 250px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .control-btn {
-            background: var(--carbon-card);
-            border: 1px solid var(--border-subtle);
-            color: var(--text-muted);
-            padding: 0.85rem 1.1rem;
-            border-radius: 8px;
-            text-align: left;
-            font-size: 0.75rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .control-btn:hover {
-            color: white;
-            background: var(--surface-hover);
-            border-color: var(--border-focus);
-        }
-
-        .control-btn.active {
-            color: var(--text-active);
-            background: var(--bg-active);
-            border-color: var(--bg-active);
-        }
-
-        /* Content panel styling */
-        .panel-container {
-            flex: 1;
-            background: var(--carbon-card);
-            border: 1px solid var(--border-subtle);
-            border-radius: 12px;
-            padding: 2.5rem;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        }
-
-        .panel-pane {
-            display: none;
-        }
-
-        .panel-pane.active {
-            display: block;
-        }
-
-        .panel-header {
-            margin-bottom: 2rem;
-            border-bottom: 1px solid var(--border-subtle);
-            padding-bottom: 1rem;
-        }
-
-        .panel-header h2 {
-            font-size: 1.2rem;
-            font-weight: 700;
-            color: white;
-            letter-spacing: -0.5px;
-        }
-
-        .panel-header p {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            margin-top: 4px;
-        }
-
-        /* Interactive Forms and Grids */
-        .form-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1.25rem;
-        }
-
-        .form-group {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            position: relative;
-        }
-
-        .form-group.full-width {
-            grid-column: span 2;
-        }
-
-        .label-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        label {
-            font-size: 0.7rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: var(--text-muted);
-        }
-
-        /* Status badges for inputs */
-        .badge-status {
-            font-size: 0.6rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            padding: 1px 6px;
-            border-radius: 4px;
-            border: 1px solid var(--border-subtle);
-        }
-        .badge-status.configured {
-            color: #ffffff;
-            border-color: #ffffff;
-        }
-        .badge-status.locked {
-            color: var(--text-dim);
-            background: rgba(255,255,255,0.02);
-            border-color: var(--text-dim);
-        }
-        .badge-status.not-configured {
-            color: var(--text-dim);
-            border-style: dashed;
-        }
-        .badge-status.active-engine {
-            color: #000000;
-            background: #ffffff;
-            border-color: #ffffff;
-        }
-
-        .input-wrapper {
-            display: flex;
-            width: 100%;
-            gap: 0;
-        }
-
-        .input-wrapper input {
-            flex: 1;
-            min-width: 0;
-            border-radius: 8px 0 0 8px;
-        }
-
-        .input-icon-btn {
-            flex-shrink: 0;
-            width: 60px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border-subtle);
-            border-left: none;
-            border-radius: 0 8px 8px 0;
-            color: var(--text-muted);
-            cursor: pointer;
-            font-size: 0.65rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            padding: 0;
-            transition: all 0.2s;
-        }
-        .input-icon-btn:hover {
-            color: #ffffff;
-            background: rgba(255, 255, 255, 0.12);
-            border-color: rgba(255, 255, 255, 0.3);
-        }
-
-        input[type="text"], input[type="password"], input[type="number"], select {
-            background: #050608;
-            border: 1px solid var(--border-subtle);
-            color: white;
-            padding: 0.8rem 0.95rem;
-            border-radius: 8px;
-            font-size: 0.8rem;
-            font-family: inherit;
-            outline: none;
-            transition: all 0.2s;
-        }
-
-        input:focus, select:focus {
-            border-color: white;
-            background: #000000;
-        }
-
-        input:disabled {
-            color: var(--text-dim);
-            background: rgba(255,255,255,0.01);
-            cursor: not-allowed;
-        }
-
-        /* Tag Input Styling */
-        .tag-input-container {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 6px;
-            background: #050608;
-            border: 1px solid var(--border-subtle);
-            border-radius: 8px;
-            padding: 6px 10px;
-            min-height: 44px;
-            cursor: text;
-            transition: all 0.2s;
-            position: relative;
-        }
-
-        .tag-input-container:focus-within {
-            border-color: white;
-            background: #000000;
-        }
-
-        .tag-chip {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid var(--border-subtle);
-            color: #ffffff;
-            font-size: 0.72rem;
-            font-family: 'JetBrains Mono', monospace;
-            padding: 3px 8px;
-            border-radius: 6px;
-            user-select: none;
-            transition: all 0.15s;
-        }
-
-        .tag-chip:hover {
-            border-color: rgba(255, 255, 255, 0.4);
-            background: rgba(255, 255, 255, 0.15);
-        }
-
-        .tag-chip .tag-remove {
-            cursor: pointer;
-            color: var(--text-muted);
-            font-size: 0.8rem;
-            font-weight: 700;
-            line-height: 1;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            transition: all 0.15s;
-        }
-
-        .tag-chip .tag-remove:hover {
-            color: #f87171;
-            background: rgba(248, 113, 113, 0.2);
-        }
-
-        .tag-input-field {
-            border: none !important;
-            background: transparent !important;
-            outline: none !important;
-            color: white !important;
-            padding: 4px 6px !important;
-            font-size: 0.8rem !important;
-            font-family: inherit !important;
-            flex: 1;
-            min-width: 160px;
-        }
-
-        /* Autocomplete dropdown styling */
-        .autocomplete-dropdown {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background: #08090d;
-            border: 1px solid var(--border-focus);
-            border-radius: 8px;
-            max-height: 200px;
-            overflow-y: auto;
-            z-index: 100;
-            display: none;
-            margin-top: 4px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.6);
-        }
-
-        .autocomplete-group {
-            padding: 6px 12px;
-            font-size: 0.6rem;
-            font-weight: 800;
-            color: var(--text-muted);
-            background: rgba(255,255,255,0.03);
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .autocomplete-item {
-            padding: 8px 12px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: all 0.15s;
-            color: var(--text-main);
-        }
-
-        .autocomplete-item:hover {
-            background: white;
-            color: black;
-            font-weight: 600;
-        }
-
-        .autocomplete-item.highlighted {
-            background: white !important;
-            color: black !important;
-            font-weight: 600;
-            padding-left: 16px;
-        }
-
-        /* Checkbox switch options */
-        .setting-switch {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0.95rem 1.15rem;
-            border: 1px solid var(--border-subtle);
-            border-radius: 8px;
-            background: rgba(255,255,255,0.005);
-            transition: all 0.2s;
-        }
-
-        .setting-switch:hover {
-            background: var(--surface-hover);
-            border-color: var(--border-focus);
-        }
-
-        .setting-switch-desc {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-
-        .setting-switch-desc h4 {
-            font-size: 0.85rem;
-            font-weight: 600;
-            color: white;
-        }
-
-        .setting-switch-desc p {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-        }
-
-        .setting-switch input[type="checkbox"] {
-            width: 16px;
-            height: 16px;
-            accent-color: white;
-            cursor: pointer;
-        }
-
-        /* Collapsible accordion settings */
-        .accordion-section {
-            border: 1px solid var(--border-subtle);
-            border-radius: 8px;
-            margin-top: 1rem;
-            overflow: hidden;
-        }
-
-        .accordion-header {
-            background: rgba(255,255,255,0.01);
-            padding: 0.95rem 1.25rem;
-            cursor: pointer;
-            font-size: 0.75rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            user-select: none;
-            transition: background 0.2s;
-        }
-
-        .accordion-header:hover {
-            background: var(--surface-hover);
-        }
-
-        .accordion-content {
-            padding: 1.5rem;
-            display: none;
-            border-top: 1px solid var(--border-subtle);
-            background: #07080a;
-        }
-
-        .accordion-content.open {
-            display: block;
-        }
-
-        /* Live Request Feed Log Table */
-        .feed-container {
-            border: 1px solid var(--border-subtle);
-            border-radius: 8px;
-            overflow: hidden;
-            margin-top: 1rem;
-            background: #040507;
-        }
-
-        .feed-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.75rem;
-            text-align: left;
-        }
-
-        .feed-table th {
-            padding: 8px 12px;
-            background: rgba(255,255,255,0.02);
-            color: var(--text-muted);
-            text-transform: uppercase;
-            font-size: 0.65rem;
-            letter-spacing: 0.5px;
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .feed-table td {
-            padding: 8px 12px;
-            border-bottom: 1px solid var(--border-subtle);
-            color: var(--text-main);
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .feed-table tr:hover {
-            background: rgba(255,255,255,0.01);
-        }
-
-        .feed-badge {
-            font-size: 0.65rem;
-            padding: 1px 4px;
-            border-radius: 4px;
-            font-weight: 700;
-        }
-
-        .feed-badge.status-200 { background: rgba(255,255,255,0.1); color: #ffffff; }
-        .feed-badge.status-error { background: rgba(127,29,29,0.3); color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
-        .feed-badge.mock { border: 1px solid var(--border-focus); color: var(--text-muted); }
-
-        /* Button configurations */
-        .console-buttons-bar {
-            margin-top: 2rem;
-            display: flex;
-            gap: 1rem;
-            border-top: 1px solid var(--border-subtle);
-            padding-top: 1.5rem;
-        }
-
-        .btn-action {
-            background: white;
-            color: black;
-            border: none;
-            padding: 0.85rem 1.75rem;
-            border-radius: 8px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .btn-action:hover {
-            background: #e2e8f0;
-        }
-
-        .btn-alt {
-            background: transparent;
-            border: 1px solid var(--border-subtle);
-            color: white;
-            padding: 0.85rem 1.5rem;
-            border-radius: 8px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .btn-alt:hover {
-            background: var(--surface-hover);
-            border-color: white;
-        }
-
-        /* Diagnostics Console box */
-        .terminal-box {
-            background: #040507;
-            border: 1px solid var(--border-subtle);
-            border-radius: 8px;
-            padding: 1.25rem;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.8rem;
-            color: #ffffff;
-            min-height: 250px;
-            max-height: 380px;
-            overflow-y: auto;
-            margin-top: 1rem;
-            box-shadow: inset 0 2px 8px rgba(0,0,0,0.8);
-        }
-
-        .terminal-line {
-            margin-bottom: 5px;
-            line-height: 1.5;
-        }
-
-        /* Gray Toaster Notification box */
-        .alert-toast {
-            position: fixed;
-            bottom: 2rem;
-            right: 2rem;
-            background: #0d0e12;
-            border: 1px solid #ffffff;
-            color: #ffffff;
-            padding: 0.85rem 1.5rem;
-            border-radius: 8px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-            transform: translateY(180%);
-            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .alert-toast.show {
-            transform: translateY(0);
-        }
-    </style>
-</head>
-<body>
-    <header>
-        <div class="brand">
-            <h1>HERMES GATE <span>//</span> PROXY</h1>
-            <p>Monochrome Client Gateway Terminus</p>
-        </div>
-        <div class="header-links">
-            <a href="/docs" target="_blank" class="header-link">Docs</a>
-        </div>
-    </header>
-
-    <!-- Real-time Telemetry Grid -->
-    <section class="live-dials-grid">
-        <div class="dial-card">
-            <h3>GATEWAY PORT</h3>
-            <div class="dial-val">
-                <span class="status-text">● ONLINE</span>
-                <span>:8090</span>
-            </div>
-            <div class="dial-badge">STANDBY</div>
-        </div>
-        <div class="dial-card">
-            <h3>TRAFFIC VOLUME</h3>
-            <div class="dial-val" id="telemetry-requests">0 <span>reqs</span></div>
-            <div class="dial-badge">ACCUMULATOR</div>
-        </div>
-        <div class="dial-card">
-            <h3>MOCK SAVINGS</h3>
-            <div class="dial-val" id="telemetry-savings">0%</div>
-            <div class="dial-badge" id="telemetry-mock-badge">0 / 0 SAVES</div>
-        </div>
-        <div class="dial-card">
-            <h3>BOT SUBSYSTEMS</h3>
-            <div class="dial-val" style="font-size: 0.95rem; flex-direction: column; gap: 4px; line-height: 1.2; justify-content: center; height: 100%;">
-                <div style="display: flex; justify-content: space-between; width: 100%;">
-                    <span style="color: var(--text-muted); font-size: 0.75rem;">DISCORD:</span>
-                    <span id="telemetry-discord" style="font-weight: 700; font-family: inherit;">...</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; width: 100%;">
-                    <span style="color: var(--text-muted); font-size: 0.75rem;">TELEGRAM:</span>
-                    <span id="telemetry-telegram" style="font-weight: 700; font-family: inherit;">...</span>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Main Workspace -->
-    <main>
-        <div class="control-sidebar">
-            <button type="button" class="control-btn active" onclick="switchPane(event, 'pane-models')">Model Matrix</button>
-            <button type="button" class="control-btn" onclick="switchPane(event, 'pane-router')">Router & Fallbacks</button>
-            <button type="button" class="control-btn" onclick="switchPane(event, 'pane-keys')">API Credentials</button>
-            <button type="button" class="control-btn" onclick="switchPane(event, 'pane-endpoints')">Local Endpoints</button>
-            <button type="button" class="control-btn" onclick="switchPane(event, 'pane-tunnels')">Proxy Tunnels & Base URLs</button>
-            <button type="button" class="control-btn" onclick="switchPane(event, 'pane-mocks')">Mock Engines</button>
-            <button type="button" class="control-btn" onclick="switchPane(event, 'pane-limits')">Throttle & Timeouts</button>
-            <button type="button" class="control-btn" onclick="switchPane(event, 'pane-bots')">Bot Matrix</button>
-            <button type="button" class="control-btn" onclick="switchPane(event, 'pane-logs')">System Trace Feed</button>
-            <button type="button" class="control-btn" onclick="switchPane(event, 'pane-guide')">Setup Guide</button>
-            <button type="button" class="control-btn" onclick="switchPane(event, 'pane-doctor')">Diagnostics</button>
-        </div>
-
-        <div class="panel-container">
-            <form id="configForm" onsubmit="saveConfigs(event)">
-                <!-- PANE 1: MODEL MATRIX -->
-                <div id="pane-models" class="panel-pane active">
-                    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <h2>Model Matrix Config</h2>
-                            <p>Map Anthropic Client requests to OpenAI-compatible provider endpoints.</p>
-                        </div>
-                        <button type="button" class="btn-alt" onclick="refreshModelsList()" style="padding: 0.5rem 1rem; font-size: 0.75rem;">Refresh Models</button>
-                    </div>
-
-                    <!-- Provider Model Counters Bar (only cloud providers) -->
-                    <div id="provider-model-counters" style="display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
-                        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); padding: 0.6rem 1rem; border-radius: 8px; font-size: 0.75rem; display: flex; align-items: center; gap: 8px;">
-                            <span style="color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 0.65rem;">OpenRouter:</span>
-                            <span id="count-open_router" style="font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #ffffff;">...</span>
-                        </div>
-                        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); padding: 0.6rem 1rem; border-radius: 8px; font-size: 0.75rem; display: flex; align-items: center; gap: 8px;">
-                            <span style="color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 0.65rem;">NVIDIA NIM:</span>
-                            <span id="count-nvidia_nim" style="font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #ffffff;">...</span>
-                        </div>
-                    </div>
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="MODEL_OPUS">MODEL_OPUS (Opus primary mapping)</label>
-                                <span id="badge-MODEL_OPUS" class="badge-status">...</span>
-                            </div>
-                            <input type="text" id="MODEL_OPUS" autocomplete="off" onfocus="handleAutocomplete('MODEL_OPUS')" onblur="blurAutocomplete('MODEL_OPUS')">
-                            <div id="MODEL_OPUS-dropdown" class="autocomplete-dropdown"></div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="MODEL_SONNET">MODEL_SONNET (Sonnet primary mapping)</label>
-                                <span id="badge-MODEL_SONNET" class="badge-status">...</span>
-                            </div>
-                            <input type="text" id="MODEL_SONNET" autocomplete="off" onfocus="handleAutocomplete('MODEL_SONNET')" onblur="blurAutocomplete('MODEL_SONNET')">
-                            <div id="MODEL_SONNET-dropdown" class="autocomplete-dropdown"></div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="MODEL_HAIKU">MODEL_HAIKU (Haiku primary mapping)</label>
-                                <span id="badge-MODEL_HAIKU" class="badge-status">...</span>
-                            </div>
-                            <input type="text" id="MODEL_HAIKU" autocomplete="off" onfocus="handleAutocomplete('MODEL_HAIKU')" onblur="blurAutocomplete('MODEL_HAIKU')">
-                            <div id="MODEL_HAIKU-dropdown" class="autocomplete-dropdown"></div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="MODEL">MODEL (Global default fallback)</label>
-                                <span id="badge-MODEL" class="badge-status">...</span>
-                            </div>
-                            <input type="text" id="MODEL" autocomplete="off" onfocus="handleAutocomplete('MODEL')" onblur="blurAutocomplete('MODEL')">
-                            <div id="MODEL-dropdown" class="autocomplete-dropdown"></div>
-                        </div>
-                        <div class="form-group full-width" style="grid-column: span 2; margin-top: 1rem; border-top: 1px dashed var(--border-subtle); padding-top: 1rem;">
-                            <h3 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">Per-Model Thinking Mode Controls (&lt;think&gt; Directive States)</h3>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                                <div>
-                                    <label for="THINKING_MODE_OPUS" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">OPUS THINKING MODE</label>
-                                    <select id="THINKING_MODE_OPUS" style="width: 100%; margin-top: 4px;">
-                                        <option value="open">open — Force &lt;think&gt; Reasoning</option>
-                                        <option value="inherit">inherit — Native Model Behavior</option>
-                                        <option value="close">close — Suppress Thinking</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label for="THINKING_MODE_SONNET" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">SONNET THINKING MODE</label>
-                                    <select id="THINKING_MODE_SONNET" style="width: 100%; margin-top: 4px;">
-                                        <option value="open">open — Force &lt;think&gt; Reasoning</option>
-                                        <option value="inherit">inherit — Native Model Behavior</option>
-                                        <option value="close">close — Suppress Thinking</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label for="THINKING_MODE_HAIKU" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">HAIKU THINKING MODE</label>
-                                    <select id="THINKING_MODE_HAIKU" style="width: 100%; margin-top: 4px;">
-                                        <option value="open">open — Force &lt;think&gt; Reasoning</option>
-                                        <option value="inherit">inherit — Native Model Behavior</option>
-                                        <option value="close">close — Suppress Thinking</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label for="THINKING_MODE_DEFAULT" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">DEFAULT THINKING MODE</label>
-                                    <select id="THINKING_MODE_DEFAULT" style="width: 100%; margin-top: 4px;">
-                                        <option value="open">open — Force &lt;think&gt; Reasoning</option>
-                                        <option value="inherit">inherit — Native Model Behavior</option>
-                                        <option value="close">close — Suppress Thinking</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Fallback Chains Config -->
-                    <div style="margin-top: 2rem; border-top: 1px solid var(--border-subtle); padding-top: 1.5rem;">
-                        <h3 style="font-size: 0.95rem; font-weight: 700; color: white; margin-bottom: 0.25rem;">Fallback Order Chains</h3>
-                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1.25rem;">Configure failover model priority list (inline tag chips with autocomplete) used when primary models are unavailable or rate-limited. Press Enter or comma to add a tag.</p>
-                        <div class="form-grid">
-                            <div class="form-group full-width">
-                                <label for="FALLBACK_ORDER_CLAUDE_OPUS">Opus Fallback Order</label>
-                                <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_OPUS" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_OPUS')">
-                                    <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_OPUS" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_OPUS')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_OPUS')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_OPUS')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_OPUS')">
-                                </div>
-                                <div id="FALLBACK_ORDER_CLAUDE_OPUS-dropdown" class="autocomplete-dropdown"></div>
-                            </div>
-                            <div class="form-group full-width">
-                                <label for="FALLBACK_ORDER_CLAUDE_SONNET">Sonnet Fallback Order</label>
-                                <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_SONNET" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_SONNET')">
-                                    <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_SONNET" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_SONNET')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET')">
-                                </div>
-                                <div id="FALLBACK_ORDER_CLAUDE_SONNET-dropdown" class="autocomplete-dropdown"></div>
-                            </div>
-                            <div class="form-group full-width">
-                                <label for="FALLBACK_ORDER_CLAUDE_HAIKU">Haiku Fallback Order</label>
-                                <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_HAIKU" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_HAIKU')">
-                                    <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_HAIKU" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_HAIKU')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_HAIKU')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_HAIKU')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_HAIKU')">
-                                </div>
-                                <div id="FALLBACK_ORDER_CLAUDE_HAIKU-dropdown" class="autocomplete-dropdown"></div>
-                            </div>
-                            <div class="form-group full-width">
-                                <label for="FALLBACK_ORDER_CLAUDE_DEFAULT">Default Fallback Order</label>
-                                <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_DEFAULT" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_DEFAULT')">
-                                    <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_DEFAULT" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_DEFAULT')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')">
-                                </div>
-                                <div id="FALLBACK_ORDER_CLAUDE_DEFAULT-dropdown" class="autocomplete-dropdown"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div><!-- /pane-models -->
-
-                <!-- PANE: ROUTER & FALLBACKS -->
-                <div id="pane-router" class="panel-pane">
-                    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <h2>Resilient Multi-Model Router Status</h2>
-                            <p>Real-time health status, Circuit Breakers, and Rate Limit Headroom for primary and fallback models.</p>
-                        </div>
-                        <button type="button" class="btn-alt" onclick="fetchRouterStatus()" style="padding: 0.5rem 1rem; font-size: 0.75rem;">Refresh Status</button>
-                    </div>
-                    
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
-                        <div class="dial-card" style="padding: 1rem;">
-                            <h3>TOTAL REGISTERED MODELS</h3>
-                            <div class="dial-val" id="router-total-models" style="font-size: 1.25rem;">-</div>
-                        </div>
-                        <div class="dial-card" style="padding: 1rem;">
-                            <h3>HEALTHY / READY</h3>
-                            <div class="dial-val" id="router-healthy-models" style="font-size: 1.25rem; color: #4ade80;">-</div>
-                        </div>
-                        <div class="dial-card" style="padding: 1rem;">
-                            <h3>CIRCUIT BREAKER OPEN</h3>
-                            <div class="dial-val" id="router-open-circuits" style="font-size: 1.25rem; color: #f87171;">-</div>
-                        </div>
-                    </div>
-
-                    <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
-                            <thead>
-                                <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px;">
-                                    <th style="padding: 0.75rem 1rem;">Model Target ID</th>
-                                    <th style="padding: 0.75rem 1rem;">Circuit State</th>
-                                    <th style="padding: 0.75rem 1rem;">Failures</th>
-                                    <th style="padding: 0.75rem 1rem;">Quota Headroom</th>
-                                    <th style="padding: 0.75rem 1rem;">Remaining Req / Tok</th>
-                                </tr>
-                            </thead>
-                            <tbody id="router-table-body">
-                                <tr><td colspan="5" style="padding: 1rem; text-align: center; color: var(--text-muted);">Loading router health matrix...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- PANE 2: API CREDENTIALS (GRID A) -->
-                <div id="pane-keys" class="panel-pane">
-                    <div class="panel-header">
-                        <h2>API Credentials Matrix</h2>
-                        <p>Configure API keys for commercial cloud models. Sensitive values are masked by default.</p>
-                    </div>
-                    <div class="form-grid">
-                        <div class="form-group full-width">
-                            <div class="label-row">
-                                <label for="GATEWAY_AUTH_TOKEN">Gateway Auth Token (Enforces local client authentication. Leave empty to disable auth)</label>
-                                <span id="badge-GATEWAY_AUTH_TOKEN" class="badge-status">...</span>
-                            </div>
-                            <div class="input-wrapper">
-                                <input type="password" id="GATEWAY_AUTH_TOKEN" placeholder="Optional. If set, ANTHROPIC_AUTH_TOKEN must match this value.">
-                                <button type="button" class="input-icon-btn" onclick="toggleMask('GATEWAY_AUTH_TOKEN')">Show</button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="NVIDIA_NIM_API_KEY">NVIDIA NIM API Key</label>
-                                <span id="badge-NVIDIA_NIM_API_KEY" class="badge-status">...</span>
-                            </div>
-                            <div class="input-wrapper">
-                                <input type="password" id="NVIDIA_NIM_API_KEY" placeholder="nvapi-...">
-                                <button type="button" class="input-icon-btn" onclick="toggleMask('NVIDIA_NIM_API_KEY')">Show</button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="OPENROUTER_API_KEY">OpenRouter API Key</label>
-                                <span id="badge-OPENROUTER_API_KEY" class="badge-status">...</span>
-                            </div>
-                            <div class="input-wrapper">
-                                <input type="password" id="OPENROUTER_API_KEY" placeholder="sk-or-v1-...">
-                                <button type="button" class="input-icon-btn" onclick="toggleMask('OPENROUTER_API_KEY')">Show</button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="MISTRAL_API_KEY">Mistral / Codestral API Key</label>
-                                <span id="badge-MISTRAL_API_KEY" class="badge-status">...</span>
-                            </div>
-                            <div class="input-wrapper">
-                                <input type="password" id="MISTRAL_API_KEY" placeholder="sk-...">
-                                <button type="button" class="input-icon-btn" onclick="toggleMask('MISTRAL_API_KEY')">Show</button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="GEMINI_API_KEY">Gemini API Key (Google)</label>
-                                <span id="badge-GEMINI_API_KEY" class="badge-status">...</span>
-                            </div>
-                            <div class="input-wrapper">
-                                <input type="password" id="GEMINI_API_KEY" placeholder="AIzaSy...">
-                                <button type="button" class="input-icon-btn" onclick="toggleMask('GEMINI_API_KEY')">Show</button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="GROQ_API_KEY">Groq API Key</label>
-                                <span id="badge-GROQ_API_KEY" class="badge-status">...</span>
-                            </div>
-                            <div class="input-wrapper">
-                                <input type="password" id="GROQ_API_KEY" placeholder="gsk_...">
-                                <button type="button" class="input-icon-btn" onclick="toggleMask('GROQ_API_KEY')">Show</button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="DEEPSEEK_API_KEY">DeepSeek API Key</label>
-                                <span id="badge-DEEPSEEK_API_KEY" class="badge-status">...</span>
-                            </div>
-                            <div class="input-wrapper">
-                                <input type="password" id="DEEPSEEK_API_KEY" placeholder="sk-...">
-                                <button type="button" class="input-icon-btn" onclick="toggleMask('DEEPSEEK_API_KEY')">Show</button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="CEREBRAS_API_KEY">Cerebras API Key</label>
-                                <span id="badge-CEREBRAS_API_KEY" class="badge-status">...</span>
-                            </div>
-                            <div class="input-wrapper">
-                                <input type="password" id="CEREBRAS_API_KEY" placeholder="csk-...">
-                                <button type="button" class="input-icon-btn" onclick="toggleMask('CEREBRAS_API_KEY')">Show</button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="FIREWORKS_API_KEY">Fireworks API Key</label>
-                                <span id="badge-FIREWORKS_API_KEY" class="badge-status">...</span>
-                            </div>
-                            <div class="input-wrapper">
-                                <input type="password" id="FIREWORKS_API_KEY" placeholder="fw_...">
-                                <button type="button" class="input-icon-btn" onclick="toggleMask('FIREWORKS_API_KEY')">Show</button>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="KIMI_API_KEY">Kimi API Key</label>
-                                <span id="badge-KIMI_API_KEY" class="badge-status">...</span>
-                            </div>
-                            <div class="input-wrapper">
-                                <input type="password" id="KIMI_API_KEY" placeholder="sk-...">
-                                <button type="button" class="input-icon-btn" onclick="toggleMask('KIMI_API_KEY')">Show</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- PANE 3: LOCAL ENDPOINTS (GRID B) -->
-                <div id="pane-endpoints" class="panel-pane">
-                    <div class="panel-header">
-                        <h2>Local Model Endpoints</h2>
-                        <p>Configure routing addresses for local LLM models running on your machine.</p>
-                    </div>
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="LM_STUDIO_BASE_URL">LM Studio Base URL</label>
-                                <span id="status-lmstudio" class="badge-status">Checking...</span>
-                            </div>
-                            <input type="text" id="LM_STUDIO_BASE_URL" placeholder="http://localhost:1234/v1">
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="LLAMA_CPP_BASE_URL">llama.cpp Base URL</label>
-                                <span id="status-llama_cpp" class="badge-status">Checking...</span>
-                            </div>
-                            <input type="text" id="LLAMA_CPP_BASE_URL" placeholder="http://localhost:8080/v1">
-                        </div>
-                        <div class="form-group">
-                            <div class="label-row">
-                                <label for="OLLAMA_BASE_URL">Ollama Base URL</label>
-                                <span id="status-ollama" class="badge-status">Checking...</span>
-                            </div>
-                            <input type="text" id="OLLAMA_BASE_URL" placeholder="http://localhost:11434">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- PANE 4: MOCK ENGINES -->
-                <div id="pane-mocks" class="panel-pane">
-                    <div class="panel-header">
-                        <h2>Mock Optimization Engines</h2>
-                        <p>Toggle local processing optimizations to speed up Claude Code interactions.</p>
-                    </div>
-                    <div style="display: flex; flex-direction: column; gap: 1rem;">
-                        <div class="setting-switch">
-                            <div class="setting-switch-desc">
-                                <h4>Fast Prefix Detection</h4>
-                                <p>Extract command safety prefix checks locally.</p>
-                            </div>
-                            <input type="checkbox" id="FAST_PREFIX_DETECTION">
-                        </div>
-                        <div class="setting-switch">
-                            <div class="setting-switch-desc">
-                                <h4>Network Probe Mocking</h4>
-                                <p>Immediately respond to system network and quota status diagnostics.</p>
-                            </div>
-                            <input type="checkbox" id="ENABLE_NETWORK_PROBE_MOCK">
-                        </div>
-                        <div class="setting-switch">
-                            <div class="setting-switch-desc">
-                                <h4>Skip Title Generation</h4>
-                                <p>Prevent external requests for generation of workspace thread titles.</p>
-                            </div>
-                            <input type="checkbox" id="ENABLE_TITLE_GENERATION_SKIP">
-                        </div>
-                        <div class="setting-switch">
-                            <div class="setting-switch-desc">
-                                <h4>Skip Suggestion Autocomplete</h4>
-                                <p>Mock auto-completions in suggestion terminal queries locally.</p>
-                            </div>
-                            <input type="checkbox" id="ENABLE_SUGGESTION_MODE_SKIP">
-                        </div>
-                        <div class="setting-switch">
-                            <div class="setting-switch-desc">
-                                <h4>Filepath Extraction Mocking</h4>
-                                <p>Perform filepath lookup extractions with a regex parser engine.</p>
-                            </div>
-                            <input type="checkbox" id="ENABLE_FILEPATH_EXTRACTION_MOCK">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- PANE 5: THROTTLE & TIMEOUTS -->
-                <div id="pane-limits" class="panel-pane">
-                    <div class="panel-header">
-                        <h2>Throttle &amp; Timeout Settings</h2>
-                        <p>Configure rate limits, concurrency caps, and HTTP socket timeouts. Select a provider preset to populate recommended values, then commit to save.</p>
-                    </div>
-
-                    <!-- Provider Preset Selector -->
-                    <div style="margin-bottom: 1.75rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 1rem 1.25rem;">
-                        <div style="font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 0.75rem;">Provider Defaults</div>
-                        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-                            <select id="provider-preset-select" style="flex: 1; min-width: 200px; max-width: 320px;">
-                                <option value="">-- Select provider --</option>
-                                <option value="nvidia_nim">NVIDIA NIM</option>
-                                <option value="openrouter">OpenRouter</option>
-                                <option value="groq">Groq</option>
-                                <option value="deepseek">DeepSeek</option>
-                                <option value="mistral">Mistral</option>
-                                <option value="cerebras">Cerebras</option>
-                            </select>
-                            <button type="button" class="btn-alt" onclick="applySelectedPreset()" style="padding: 0.75rem 1.5rem; font-size: 0.75rem; white-space: nowrap;">Apply Defaults</button>
-                        </div>
-                        <div id="preset-desc" style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.65rem; min-height: 1rem; line-height: 1.5;"></div>
-                    </div>
-
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="PROVIDER_RATE_LIMIT">Rate Limit (requests per window)</label>
-                            <input type="number" id="PROVIDER_RATE_LIMIT">
-                        </div>
-                        <div class="form-group">
-                            <label for="PROVIDER_RATE_WINDOW">Rate Window (seconds)</label>
-                            <input type="number" id="PROVIDER_RATE_WINDOW">
-                        </div>
-                        <div class="form-group">
-                            <label for="PROVIDER_MAX_CONCURRENCY">Max Concurrent Connections</label>
-                            <input type="number" id="PROVIDER_MAX_CONCURRENCY">
-                        </div>
-                        <div class="form-group">
-                            <label for="HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
-                            <input type="number" id="HTTP_READ_TIMEOUT">
-                        </div>
-                        <div class="form-group">
-                            <label for="HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
-                            <input type="number" id="HTTP_WRITE_TIMEOUT">
-                        </div>
-                        <div class="form-group">
-                            <label for="HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
-                            <input type="number" id="HTTP_CONNECT_TIMEOUT">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- PANE 6: BOT MATRIX -->
-                <div id="pane-bots" class="panel-pane">
-                    <div class="panel-header">
-                        <h2>Bot Matrix Administration</h2>
-                        <p>Set token mappings and workspace folders for Telegram/Discord admin endpoints.</p>
-                    </div>
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="MESSAGING_PLATFORM">Messaging Platform</label>
-                            <select id="MESSAGING_PLATFORM">
-                                <option value="discord">Discord</option>
-                                <option value="telegram">Telegram</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="CLAUDE_WORKSPACE">Workspace Directory</label>
-                            <input type="text" id="CLAUDE_WORKSPACE">
-                        </div>
-                        <div class="form-group full-width">
-                            <label for="TELEGRAM_BOT_TOKEN">Telegram Bot Token</label>
-                            <input type="password" id="TELEGRAM_BOT_TOKEN">
-                        </div>
-                        <div class="form-group full-width">
-                            <label for="ALLOWED_TELEGRAM_USER_ID">Telegram Chat ID / User ID</label>
-                            <input type="text" id="ALLOWED_TELEGRAM_USER_ID">
-                        </div>
-                        <div class="form-group full-width">
-                            <label for="DISCORD_BOT_TOKEN">Discord Bot Token</label>
-                            <input type="password" id="DISCORD_BOT_TOKEN">
-                        </div>
-                        <div class="form-group full-width">
-                            <label for="ALLOWED_DISCORD_CHANNELS">Discord Channel IDs (comma separated)</label>
-                            <input type="text" id="ALLOWED_DISCORD_CHANNELS">
-                        </div>
-                    </div>
-                </div>
-
-                <!-- PANE 7: SYSTEM TRACE FEED -->
-                <div id="pane-logs" class="panel-pane">
-                    <div class="panel-header">
-                        <h2>System Request Trace Feed</h2>
-                        <p>Real-time rolling ledger tracing API calls, mapped execution models, error indicators, and response latencies.</p>
-                    </div>
-                    <div class="feed-container">
-                        <table class="feed-table">
-                            <thead>
-                                <tr>
-                                    <th>Time</th>
-                                    <th>Call Path</th>
-                                    <th>Client Model</th>
-                                    <th>Resolved Upstream</th>
-                                    <th>Latency</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="live-request-feed-body">
-                                <tr>
-                                    <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 20px;">No operational traffic logged. Awaiting API events...</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- PANE 8: DIAGNOSTICS -->
-                <div id="pane-doctor" class="panel-pane">
-                    <div class="panel-header">
-                        <h2>Diagnostics Console</h2>
-                        <p>Run diagnostic checks and inspect raw connection capabilities.</p>
-                    </div>
-                    <button type="button" class="btn-alt" onclick="runDiagnostics()">Run Diagnostics</button>
-                    <div class="terminal-box" id="terminalConsole">
-                        <div class="terminal-line">> Console ready. Awaiting instructions...</div>
-                    </div>
-                </div>
-
-                <!-- PANE 9: SETUP GUIDE -->
-                <div id="pane-guide" class="panel-pane">
-                    <div class="panel-header">
-                        <h2>Setup Guide & Environment Settings</h2>
-                        <p>Learn how to redirect the Claude Code CLI tool through this local proxy gateway.</p>
-                    </div>
-                    <div style="display: flex; flex-direction: column; gap: 1.5rem; font-size: 0.85rem; line-height: 1.6;">
-                        <div>
-                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">1. Concept</h3>
-                            <p style="color: var(--text-muted);">
-                                By default, Claude Code connects directly to Anthropic's cloud endpoints. We redirect its traffic locally using the <code>ANTHROPIC_BASE_URL</code> environment variable. 
-                                Since Claude Code requires an authentication token to initialize, we provide a dummy token <code>freecc</code> (or your custom Gateway Token) via <code>ANTHROPIC_AUTH_TOKEN</code>.
-                            </p>
-                        </div>
-
-                        <div>
-                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">2. Bash / Zsh Shell Integration</h3>
-                            <p style="color: var(--text-muted); margin-bottom: 0.5rem;">Run this inside your terminal session to connect directly, or add it to your <code>~/.bashrc</code> or <code>~/.zshrc</code> file:</p>
-                            <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;">export ANTHROPIC_BASE_URL="http://127.0.0.1:8090"
-export ANTHROPIC_AUTH_TOKEN="<span class="guide-token-display">freecc</span>"
-claude</code></pre>
-                        </div>
-
-                        <div>
-                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">3. Fish Shell Integration</h3>
-                            <p style="color: var(--text-muted); margin-bottom: 0.5rem;">For Fish shell users, you can define a custom function (e.g., <code>fcc-claude</code>) in your fish configuration (<code>~/.config/fish/functions/fcc-claude.fish</code>):</p>
-                            <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;">function fcc-claude
-    env ANTHROPIC_BASE_URL="http://127.0.0.1:8090" ANTHROPIC_AUTH_TOKEN="<span class="guide-token-display">freecc</span>" claude $argv
-end</code></pre>
-                            <p style="color: var(--text-muted); margin-top: 0.5rem;">Then, simply type <code>fcc-claude</code> in your terminal to launch it with the proxy routing enabled, or use <code>claude</code> to bypass the proxy.</p>
-                        </div>
-
-                        <div style="border-top: 1px solid var(--border-subtle); padding-top: 1rem;">
-                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">Security Note — Gateway Auth Token</h3>
-                            <p style="color: var(--text-muted);">
-                                Currently, your Gateway Token state is: <strong id="guide-token-state" style="color: white;">DISABLED</strong>.
-                                <br>
-                                You can configure a custom token inside the <strong>API Credentials</strong> pane. If configured, you must set your <code>ANTHROPIC_AUTH_TOKEN</code> override to match that exact token. If left blank, any dummy string is accepted.
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- PANE: ADVANCED PROXY TUNNELS & BASE URLS -->
-                <div id="pane-tunnels" class="panel-pane">
-                    <div class="panel-header">
-                        <h2>Advanced Proxy Tunnels & Base URLs</h2>
-                        <p>Configure custom upstream base URLs and proxy endpoint destinations for commercial LLM providers.</p>
-                    </div>
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="NVIDIA_NIM_BASE_URL">NVIDIA NIM Base URL Proxy</label>
-                            <input type="text" id="NVIDIA_NIM_BASE_URL" placeholder="https://integrate.api.nvidia.com/v1">
-                        </div>
-                        <div class="form-group">
-                            <label for="OPENROUTER_BASE_URL">OpenRouter Base URL Proxy</label>
-                            <input type="text" id="OPENROUTER_BASE_URL" placeholder="https://openrouter.ai/api/v1">
-                        </div>
-                        <div class="form-group">
-                            <label for="MISTRAL_BASE_URL">Mistral / Codestral Base URL Proxy</label>
-                            <input type="text" id="MISTRAL_BASE_URL" placeholder="https://api.mistral.ai/v1">
-                        </div>
-                        <div class="form-group">
-                            <label for="GEMINI_BASE_URL">Gemini Base URL Proxy</label>
-                            <input type="text" id="GEMINI_BASE_URL" placeholder="https://generativelanguage.googleapis.com/v1beta">
-                        </div>
-                        <div class="form-group">
-                            <label for="GROQ_BASE_URL">Groq Base URL Proxy</label>
-                            <input type="text" id="GROQ_BASE_URL" placeholder="https://api.groq.com/openai/v1">
-                        </div>
-                        <div class="form-group">
-                            <label for="DEEPSEEK_BASE_URL">DeepSeek Base URL Proxy</label>
-                            <input type="text" id="DEEPSEEK_BASE_URL" placeholder="https://api.deepseek.com/v1">
-                        </div>
-                        <div class="form-group">
-                            <label for="CEREBRAS_BASE_URL">Cerebras Base URL Proxy</label>
-                            <input type="text" id="CEREBRAS_BASE_URL" placeholder="https://api.cerebras.ai/v1">
-                        </div>
-                        <div class="form-group">
-                            <label for="FIREWORKS_BASE_URL">Fireworks Base URL Proxy</label>
-                            <input type="text" id="FIREWORKS_BASE_URL" placeholder="https://api.fireworks.ai/inference/v1">
-                        </div>
-                    </div>
-                </div>
-
-                <div class="console-buttons-bar" id="actionButtons">
-                    <button type="submit" class="btn-action">Commit Configuration</button>
-                    <button type="button" class="btn-alt" onclick="revertConfigs()">Revert changes</button>
-                </div>
-            </form>
-        </div>
-    </main>
-
-    <div class="alert-toast" id="saveToast">Configuration saved</div>
-
-    <script>
-        let configSnapshot = {};
-        let modelsSnapshot = {};
-        let lockStatuses = {};
-
-        async function fetchModels() {
-            try {
-                const resp = await fetch('/api/models');
-                modelsSnapshot = await resp.json();
-                
-                // Update model count badges
-                for (const [provider, list] of Object.entries(modelsSnapshot)) {
-                    const badge = document.getElementById('count-' + provider);
-                    if (badge) {
-                        badge.innerText = `${list.length} models fetched`;
-                    }
-                }
-            } catch (e) {
-                console.error("Failed to fetch autocomplete list", e);
-            }
-        }
-
-        async function loadConfigs() {
-            try {
-                const resp = await fetch('/api/config');
-                const data = await resp.json();
-                configSnapshot = data.configs;
-                lockStatuses = data.key_statuses;
-                
-                for (const [key, value] of Object.entries(configSnapshot)) {
-                    const el = document.getElementById(key);
-                    if (!el) continue;
-
-                    if (el.type === 'checkbox') {
-                        el.checked = !!value;
-                    } else {
-                        el.value = value;
-                    }
-
-                    // Apply status badge & Lock check
-                    const badge = document.getElementById('badge-' + key);
-                    if (badge) {
-                        const status = lockStatuses[key] || "Not Configured";
-                        badge.innerText = status;
-                        badge.className = 'badge-status ' + status.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-                        
-                        if (status === "Locked") {
-                            el.disabled = true;
-                            // Add lock indicators
-                            const parent = el.closest('.form-group');
-                            if (parent) parent.style.opacity = '0.7';
-                        } else {
-                            el.disabled = false;
-                            const parent = el.closest('.form-group');
-                            if (parent) parent.style.opacity = '1';
-                        }
-                    }
-                }
-                // Populate Fallback Chains
-                if (data.fallbacks) {
-                    for (const [alias, entry] of Object.entries(data.fallbacks)) {
-                        const inputId = 'FALLBACK_ORDER_' + alias.toUpperCase();
-                        if (entry.fallback_order) {
-                            tagState[inputId] = [...entry.fallback_order];
-                            renderTags(inputId);
-                        }
-                    }
-                }
-
-                // Update dynamic guide tokens
-                const tokenVal = configSnapshot["GATEWAY_AUTH_TOKEN"] || "freecc";
-                document.querySelectorAll(".guide-token-display").forEach(el => {
-                    el.innerText = tokenVal;
-                });
-                const tokenState = document.getElementById("guide-token-state");
-                if (tokenState) {
-                    if (configSnapshot["GATEWAY_AUTH_TOKEN"]) {
-                        tokenState.innerText = "ACTIVE (Value: " + configSnapshot["GATEWAY_AUTH_TOKEN"] + ")";
-                        tokenState.style.color = "#ffffff";
-                    } else {
-                        tokenState.innerText = "DISABLED (Any dummy token will be accepted)";
-                        tokenState.style.color = "var(--text-dim)";
-                    }
-                }
-            } catch (e) {
-                console.error("Failed to load configs", e);
-            }
-        }
-
-        async function revertConfigs() {
-            await loadConfigs();
-            showToast("Changes reverted.", "success");
-        }
-
-        async function saveConfigs(event) {
-            event.preventDefault();
-            const payload = {};
-            for (const key of Object.keys(configSnapshot)) {
-                const el = document.getElementById(key);
-                if (!el) continue;
-
-                // Check lock status
-                if (lockStatuses[key] === "Locked") {
-                    payload[key] = configSnapshot[key];
-                    continue;
-                }
-
-                if (el.type === 'checkbox') {
-                    payload[key] = el.checked;
-                } else if (el.type === 'number') {
-                    payload[key] = parseInt(el.value) || 0;
-                } else {
-                    payload[key] = el.value;
-                }
-            }
-
-            // Also collect Fallback Chains from tagState
-            ['CLAUDE_OPUS', 'CLAUDE_SONNET', 'CLAUDE_HAIKU', 'CLAUDE_DEFAULT'].forEach(alias => {
-                const inputId = 'FALLBACK_ORDER_' + alias;
-                // Add any remaining text typed in input before saving
-                const inputEl = document.getElementById(inputId);
-                if (inputEl && inputEl.value.trim()) {
-                    addTag(inputId, inputEl.value);
-                }
-                payload[inputId] = (tagState[inputId] || []).join(', ');
-            });
-
-            try {
-                const resp = await fetch('/api/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ configs: payload })
-                });
-                const res = await resp.json();
-                if (res.status === 'success') {
-                    showToast("Configuration saved & reloaded.", "success");
-                    configSnapshot = payload;
-                    await loadConfigs();
-                    fetchModels();
-                } else {
-                    showToast("Commit failed: " + res.message, "error");
-                }
-            } catch (e) {
-                showToast("Network error saving configs.", "error");
-            }
-        }
-
-        function showToast(message, type = "success") {
-            const toast = document.getElementById('saveToast');
-            toast.innerText = message;
-            if (type === "error") {
-                toast.style.background = "#1a0f0f";
-                toast.style.borderColor = "#f87171";
-                toast.style.color = "#f87171";
-            } else {
-                toast.style.background = "#0c0d11";
-                toast.style.borderColor = "#ffffff";
-                toast.style.color = "#ffffff";
-            }
-            toast.classList.add('show');
-            setTimeout(() => {
-                toast.classList.remove('show');
-            }, 3000);
-        }
-
-        function switchPane(event, paneId) {
-            console.log("Switching to pane:", paneId);
-            document.querySelectorAll('.control-btn').forEach(btn => btn.classList.remove('active'));
-            document.querySelectorAll('.panel-pane').forEach(pane => pane.classList.remove('active'));
-
-            event.currentTarget.classList.add('active');
-            document.getElementById(paneId).classList.add('active');
-
-            const actionButtons = document.getElementById('actionButtons');
-
-            // Hide action commit bar for read-only pages
-            if (paneId === 'pane-doctor' || paneId === 'pane-logs' || paneId === 'pane-guide' || paneId === 'pane-router') {
-                actionButtons.style.display = 'none';
-            } else {
-                actionButtons.style.display = 'flex';
-            }
-
-            if (paneId === 'pane-router') {
-                fetchRouterStatus();
-            }
-        }
-
-        async function fetchRouterStatus() {
-            try {
-                const resp = await fetch('/api/router-status');
-                const data = await resp.json();
-                
-                document.getElementById('router-total-models').innerText = data.summary.total_models || 0;
-                document.getElementById('router-healthy-models').innerText = data.summary.healthy || 0;
-                document.getElementById('router-open-circuits').innerText = data.summary.circuit_open || 0;
-
-                const tbody = document.getElementById('router-table-body');
-                tbody.innerHTML = '';
-
-                const entries = Object.entries(data.models);
-                if (entries.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="padding: 1rem; text-align: center; color: var(--text-muted);">No models routed yet. Try sending a request through the proxy.</td></tr>';
-                    return;
-                }
-
-                for (const [modelId, status] of entries) {
-                    const tr = document.createElement('tr');
-                    tr.style.borderBottom = '1px solid var(--border-subtle)';
-
-                    const cb = status.circuit_breaker || {};
-                    const rl = status.rate_limit || {};
-
-                    const stateColor = cb.state === 'closed' ? '#4ade80' : (cb.state === 'half_open' ? '#facc15' : '#f87171');
-                    const headroomColor = rl.has_headroom ? '#4ade80' : '#f87171';
-
-                    const reqRem = rl.req_remaining !== null && rl.req_remaining !== undefined ? rl.req_remaining : '∞';
-                    const tokRem = rl.tok_remaining !== null && rl.tok_remaining !== undefined ? rl.tok_remaining : '∞';
-
-                    tr.innerHTML = `
-                        <td style="padding: 0.75rem 1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">${modelId}</td>
-                        <td style="padding: 0.75rem 1rem;"><span style="color: ${stateColor}; font-weight: 700; text-transform: uppercase; font-size: 0.7rem;">● ${cb.state || 'CLOSED'}</span></td>
-                        <td style="padding: 0.75rem 1rem; color: var(--text-muted);">${cb.failure_count || 0}</td>
-                        <td style="padding: 0.75rem 1rem;"><span style="color: ${headroomColor}; font-weight: 700;">${rl.has_headroom ? 'YES (≥10%)' : 'NO (LIMITED)'}</span></td>
-                        <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">${reqRem} req / ${tokRem} tok</td>
-                    `;
-                    tbody.appendChild(tr);
-                }
-            } catch (e) {
-                console.error("Failed to fetch router status:", e);
-            }
-        }
-
-        function toggleAccordion() {
-            const content = document.getElementById('accordionContent');
-            const arrow = document.getElementById('accordionArrow');
-            const isOpen = content.classList.toggle('open');
-            arrow.innerText = isOpen ? '▼' : '▶';
-        }
-
-        function toggleMask(inputId) {
-            const el = document.getElementById(inputId);
-            const wrapper = el.closest('.input-wrapper');
-            const btn = wrapper.querySelector('.input-icon-btn');
-            if (el.type === 'password') {
-                el.type = 'text';
-                btn.innerText = 'Hide';
-            } else {
-                el.type = 'password';
-                btn.innerText = 'Show';
-            }
-        }
-
-        async function runDiagnostics() {
-            showToast("Running system diagnostics...", "success");
-            const consoleEl = document.getElementById('terminalConsole');
-            consoleEl.innerHTML = '<div class="terminal-line">> Initializing diagnostic check...</div>';
-            try {
-                const resp = await fetch('/api/diagnostics');
-                const data = await resp.json();
-
-                consoleEl.innerHTML = '';
-
-                let i = 0;
-                function printLine() {
-                    if (i < data.logs.length) {
-                        const div = document.createElement('div');
-                        div.className = 'terminal-line';
-                        div.innerText = data.logs[i];
-                        consoleEl.appendChild(div);
-                        consoleEl.scrollTop = consoleEl.scrollHeight;
-                        i++;
-                        setTimeout(printLine, 150);
-                    } else {
-                        const finalDiv = document.createElement('div');
-                        finalDiv.className = 'terminal-line';
-                        if (data.has_errors) {
-                            finalDiv.style.color = '#f87171';
-                            finalDiv.innerText = 'DIAGNOSTICS COMPLETE - ADVISORIES FOUND.';
-                            showToast("Diagnostics completed with advisories.", "error");
-                        } else {
-                            finalDiv.style.color = '#ffffff';
-                            finalDiv.innerText = 'ALL SYSTEMS FUNCTIONAL. READY TO PROCESS.';
-                            showToast("System diagnostics completed.", "success");
-                        }
-                        consoleEl.appendChild(finalDiv);
-                        consoleEl.scrollTop = consoleEl.scrollHeight;
-                    }
-                }
-                printLine();
-            } catch (e) {
-                consoleEl.innerHTML += '<div class="terminal-line" style="color: #f87171">> System connection failed: ' + e + '</div>';
-                showToast("Diagnostics check failed.", "error");
-            }
-        }
-
-        // Live Telemetry statistics poller
-        async function pollTelemetry() {
-            try {
-                const resp = await fetch('/api/stats');
-                const data = await resp.json();
-
-                // Update request counters
-                document.getElementById('telemetry-requests').innerHTML = `${data.total_requests} <span>reqs</span>`;
-
-                if (data.total_requests > 0) {
-                    const ratio = Math.round((data.mocked_requests / data.total_requests) * 100);
-                    document.getElementById('telemetry-savings').innerText = `${ratio}%`;
-                } else {
-                    document.getElementById('telemetry-savings').innerText = `0%`;
-                }
-                document.getElementById('telemetry-mock-badge').innerText = `${data.mocked_requests} / ${data.total_requests} SAVES`;
-
-                // Update Bot connectivity
-                const dsEl = document.getElementById('telemetry-discord');
-                dsEl.innerText = data.ds_bot_status;
-                dsEl.style.color = data.ds_bot_status === 'Online' ? '#ffffff' : 'var(--text-dim)';
-
-                const tgEl = document.getElementById('telemetry-telegram');
-                tgEl.innerText = data.tg_bot_status;
-                tgEl.style.color = data.tg_bot_status === 'Online' ? '#ffffff' : 'var(--text-dim)';
-
-                // Update local services online health badges
-                for (const [service, status] of Object.entries(data.endpoints)) {
-                    const statusBadge = document.getElementById('status-' + service);
-                    if (statusBadge) {
-                        statusBadge.innerText = status;
-                        statusBadge.style.color = status === 'Online' ? '#ffffff' : 'var(--text-dim)';
-                        statusBadge.style.borderColor = status === 'Online' ? '#ffffff' : 'var(--border-subtle)';
-                    }
-                }
-
-                // Render Live Request Trace log feed
-                const feedBody = document.getElementById('live-request-feed-body');
-                if (data.recent_requests && data.recent_requests.length > 0) {
-                    feedBody.innerHTML = '';
-                    // Display in reverse order (newest first)
-                    const sorted = [...data.recent_requests].reverse();
-                    sorted.forEach(req => {
-                        const tr = document.createElement('tr');
-                        
-                        const tdTime = document.createElement('td');
-                        tdTime.innerText = req.timestamp;
-                        tr.appendChild(tdTime);
-
-                        const tdPath = document.createElement('td');
-                        tdPath.innerText = `${req.method} ${req.path}`;
-                        tr.appendChild(tdPath);
-
-                        const tdClient = document.createElement('td');
-                        tdClient.innerText = req.client_model;
-                        tr.appendChild(tdClient);
-
-                        const tdUpstream = document.createElement('td');
-                        tdUpstream.innerText = req.mapped_model || req.target_model || '-';
-                        tr.appendChild(tdUpstream);
-
-                        const tdLatency = document.createElement('td');
-                        const dur = req.duration_ms !== undefined ? req.duration_ms : (req.latency_ms || 0);
-                        tdLatency.innerText = `${dur} ms`;
-                        tr.appendChild(tdLatency);
-
-                        const tdStatus = document.createElement('td');
-                        const spanStatus = document.createElement('span');
-                        spanStatus.className = 'feed-badge ' + (req.status_code === 200 ? 'status-200' : 'status-error');
-                        spanStatus.innerText = req.status_code;
-                        tdStatus.appendChild(spanStatus);
-
-                        if (req.mocked) {
-                            const spanMock = document.createElement('span');
-                            spanMock.className = 'feed-badge mock';
-                            spanMock.style.marginLeft = '6px';
-                            spanMock.innerText = 'MOCK';
-                            tdStatus.appendChild(spanMock);
-                        }
-
-                        if (req.fallbacks_used && req.fallbacks_used.length > 0) {
-                            const spanFb = document.createElement('span');
-                            spanFb.className = 'feed-badge mock';
-                            spanFb.style.marginLeft = '6px';
-                            spanFb.style.background = 'rgba(234, 179, 8, 0.2)';
-                            spanFb.style.color = '#fef08a';
-                            spanFb.innerText = `FALLBACK (${req.fallbacks_used.length})`;
-                            tdStatus.appendChild(spanFb);
-                        }
-
-                        tr.appendChild(tdStatus);
-                        feedBody.appendChild(tr);
-                    });
-                } else {
-                    feedBody.innerHTML = `<tr>
-                        <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 20px;">No operational traffic logged. Awaiting API events...</td>
-                    </tr>`;
-                }
-
-            } catch (e) {
-                console.error("Telemetry link lost", e);
-            }
-        }
-
-        let activeSuggestionIndex = -1;
-        let currentVisibleItems = [];
-
-        async function refreshModelsList() {
-            showToast("🔄 Refreshing available models list...", "success");
-            await fetchModels();
-            showToast("✅ Models list refreshed successfully.", "success");
-        }
-
-        // Search Autocomplete Suggestion Logic
-        function handleAutocomplete(inputId) {
-            const inputEl = document.getElementById(inputId);
-            const dropdownEl = document.getElementById(inputId + '-dropdown');
-            
-            dropdownEl.innerHTML = '';
-            let count = 0;
-            currentVisibleItems = [];
-            activeSuggestionIndex = -1;
-
-            for (const [provider, list] of Object.entries(modelsSnapshot)) {
-                if (list.length === 0) continue;
-
-                const textVal = inputEl.value.toLowerCase();
-                const providerPrefix = provider + '/';
-                const filtered = list.filter(m => {
-                    const full = providerPrefix + m;
-                    return !textVal || full.toLowerCase().includes(textVal);
-                });
-
-                if (filtered.length > 0) {
-                    const header = document.createElement('div');
-                    header.className = 'autocomplete-group';
-                    header.innerText = provider.replace('_', ' ');
-                    dropdownEl.appendChild(header);
-
-                    filtered.forEach(m => {
-                        count++;
-                        const fullStr = providerPrefix + m;
-                        const item = document.createElement('div');
-                        item.className = 'autocomplete-item';
-                        item.innerText = fullStr;
-                        item.onmousedown = () => {
-                            selectSuggestion(inputId, fullStr);
-                        };
-                        dropdownEl.appendChild(item);
-                        currentVisibleItems.push(item);
-                    });
-                }
-            }
-
-            if (count > 0) {
-                dropdownEl.style.display = 'block';
-            } else {
-                dropdownEl.style.display = 'none';
-            }
-        }
-
-        // Tag State Management
-        const tagState = {
-            FALLBACK_ORDER_CLAUDE_OPUS: [],
-            FALLBACK_ORDER_CLAUDE_SONNET: [],
-            FALLBACK_ORDER_CLAUDE_HAIKU: [],
-            FALLBACK_ORDER_CLAUDE_DEFAULT: [],
-        };
-
-        function renderTags(inputId) {
-            const container = document.getElementById('tag-container-' + inputId);
-            if (!container) return;
-
-            // Clear existing chips
-            container.querySelectorAll('.tag-chip').forEach(chip => chip.remove());
-
-            const tags = tagState[inputId] || [];
-            const inputEl = document.getElementById(inputId);
-
-            tags.forEach((tag, idx) => {
-                const chip = document.createElement('div');
-                chip.className = 'tag-chip';
-                
-                const spanText = document.createElement('span');
-                spanText.innerText = tag;
-                chip.appendChild(spanText);
-
-                const removeBtn = document.createElement('span');
-                removeBtn.className = 'tag-remove';
-                removeBtn.innerHTML = '&times;';
-                removeBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    removeTag(inputId, idx);
-                };
-                chip.appendChild(removeBtn);
-
-                container.insertBefore(chip, inputEl);
-            });
-        }
-
-        function addTag(inputId, val) {
-            const trimmed = val.trim().replace(/,/g, '');
-            if (!trimmed) return;
-
-            if (!tagState[inputId]) tagState[inputId] = [];
-            if (!tagState[inputId].includes(trimmed)) {
-                tagState[inputId].push(trimmed);
-                renderTags(inputId);
-            }
-            const inputEl = document.getElementById(inputId);
-            if (inputEl) inputEl.value = '';
-        }
-
-        function removeTag(inputId, index) {
-            if (tagState[inputId]) {
-                tagState[inputId].splice(index, 1);
-                renderTags(inputId);
-            }
-        }
-
-        function focusTagInput(inputId) {
-            const inputEl = document.getElementById(inputId);
-            if (inputEl) inputEl.focus();
-        }
-
-        function closeAllAutocompleteDropdowns() {
-            document.querySelectorAll('.autocomplete-dropdown').forEach(dropdown => {
-                dropdown.style.display = 'none';
-            });
-            activeSuggestionIndex = -1;
-            currentVisibleItems = [];
-        }
-
-        function handleTagInputKeyDown(event, inputId) {
-            const inputEl = document.getElementById(inputId);
-            const dropdownEl = document.getElementById(inputId + '-dropdown');
-
-            if (event.key === 'Escape') {
-                event.preventDefault();
-                closeAllAutocompleteDropdowns();
-                return;
-            }
-
-            // If dropdown active with selection
-            if (dropdownEl && dropdownEl.style.display !== 'none' && currentVisibleItems.length > 0) {
-                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                    handleInputKeyDown(event, inputId);
-                    return;
-                }
-                if (event.key === 'Enter') {
-                    if (activeSuggestionIndex >= 0 && activeSuggestionIndex < currentVisibleItems.length) {
-                        event.preventDefault();
-                        const selectedText = currentVisibleItems[activeSuggestionIndex].innerText;
-                        selectSuggestion(inputId, selectedText);
-                        return;
-                    }
-                }
-            }
-
-            if (event.key === 'Enter' || event.key === ',') {
-                event.preventDefault();
-                addTag(inputId, inputEl.value);
-                if (dropdownEl) dropdownEl.style.display = 'none';
-            } else if (event.key === 'Backspace' && !inputEl.value) {
-                if (tagState[inputId] && tagState[inputId].length > 0) {
-                    removeTag(inputId, tagState[inputId].length - 1);
-                }
-            }
-        }
-
-        function selectSuggestion(inputId, value) {
-            if (inputId.startsWith('FALLBACK_ORDER_')) {
-                addTag(inputId, value);
-            } else {
-                const inputEl = document.getElementById(inputId);
-                inputEl.value = value;
-            }
-            closeAllAutocompleteDropdowns();
-        }
-
-        // Close dropdowns when clicking outside
-        document.addEventListener('click', (event) => {
-            const isClickInsideGroup = event.target.closest('.form-group');
-            if (!isClickInsideGroup) {
-                closeAllAutocompleteDropdowns();
-            }
-        });
-
-        // Wire event listeners for live filtering
-        document.querySelectorAll('input[type="text"]').forEach(input => {
-            if (['MODEL_OPUS', 'MODEL_SONNET', 'MODEL_HAIKU', 'MODEL'].includes(input.id)) {
-                input.addEventListener('input', () => handleAutocomplete(input.id));
-                input.addEventListener('keydown', (e) => handleInputKeyDown(e, input.id));
-            }
-        });
-
-        // Provider default preset configs
-        const PROVIDER_PRESETS = {
-            nvidia_nim: {
-                label: 'NVIDIA NIM — high-throughput, optimised for long generation timeouts. Rate: 60 req/min, Concurrency: 10, Read: 300s.',
-                PROVIDER_RATE_LIMIT: 60,
-                PROVIDER_RATE_WINDOW: 60,
-                PROVIDER_MAX_CONCURRENCY: 10,
-                HTTP_READ_TIMEOUT: 300,
-                HTTP_WRITE_TIMEOUT: 30,
-                HTTP_CONNECT_TIMEOUT: 5,
-            },
-            openrouter: {
-                label: 'OpenRouter — balanced defaults for free-tier cloud routing. Rate: 40 req/min, Concurrency: 5, Read: 180s.',
-                PROVIDER_RATE_LIMIT: 40,
-                PROVIDER_RATE_WINDOW: 60,
-                PROVIDER_MAX_CONCURRENCY: 5,
-                HTTP_READ_TIMEOUT: 180,
-                HTTP_WRITE_TIMEOUT: 20,
-                HTTP_CONNECT_TIMEOUT: 5,
-            },
-            groq: {
-                label: 'Groq — ultra-fast inference, conservative rate limits. Rate: 30 req/min, Concurrency: 4, Read: 60s.',
-                PROVIDER_RATE_LIMIT: 30,
-                PROVIDER_RATE_WINDOW: 60,
-                PROVIDER_MAX_CONCURRENCY: 4,
-                HTTP_READ_TIMEOUT: 60,
-                HTTP_WRITE_TIMEOUT: 10,
-                HTTP_CONNECT_TIMEOUT: 5,
-            },
-            deepseek: {
-                label: 'DeepSeek — moderate throughput with generous timeouts. Rate: 50 req/min, Concurrency: 6, Read: 180s.',
-                PROVIDER_RATE_LIMIT: 50,
-                PROVIDER_RATE_WINDOW: 60,
-                PROVIDER_MAX_CONCURRENCY: 6,
-                HTTP_READ_TIMEOUT: 180,
-                HTTP_WRITE_TIMEOUT: 20,
-                HTTP_CONNECT_TIMEOUT: 5,
-            },
-            mistral: {
-                label: 'Mistral — standard cloud inference defaults. Rate: 40 req/min, Concurrency: 5, Read: 120s.',
-                PROVIDER_RATE_LIMIT: 40,
-                PROVIDER_RATE_WINDOW: 60,
-                PROVIDER_MAX_CONCURRENCY: 5,
-                HTTP_READ_TIMEOUT: 120,
-                HTTP_WRITE_TIMEOUT: 15,
-                HTTP_CONNECT_TIMEOUT: 5,
-            },
-            cerebras: {
-                label: 'Cerebras — wafer-scale fast inference. Rate: 60 req/min, Concurrency: 8, Read: 60s.',
-                PROVIDER_RATE_LIMIT: 60,
-                PROVIDER_RATE_WINDOW: 60,
-                PROVIDER_MAX_CONCURRENCY: 8,
-                HTTP_READ_TIMEOUT: 60,
-                HTTP_WRITE_TIMEOUT: 10,
-                HTTP_CONNECT_TIMEOUT: 5,
-            },
-        };
-
-        function applySelectedPreset() {
-            const sel = document.getElementById('provider-preset-select');
-            const providerKey = sel ? sel.value : '';
-            if (!providerKey) {
-                showToast('Select a provider from the dropdown first.', 'error');
-                return;
-            }
-            applyProviderPreset(providerKey);
-        }
-
-        function applyProviderPreset(providerKey) {
-            const preset = PROVIDER_PRESETS[providerKey];
-            if (!preset) return;
-            const fields = ['PROVIDER_RATE_LIMIT', 'PROVIDER_RATE_WINDOW', 'PROVIDER_MAX_CONCURRENCY',
-                            'HTTP_READ_TIMEOUT', 'HTTP_WRITE_TIMEOUT', 'HTTP_CONNECT_TIMEOUT'];
-            fields.forEach(field => {
-                const el = document.getElementById(field);
-                if (el) el.value = preset[field];
-            });
-            const descEl = document.getElementById('preset-desc');
-            if (descEl) descEl.innerText = preset.label;
-            showToast('Preset applied. Click Commit to save.', 'success');
-        }
-
-        // Auto-populate description when dropdown changes
-        document.getElementById('provider-preset-select').addEventListener('change', function() {
-            const preset = PROVIDER_PRESETS[this.value];
-            const descEl = document.getElementById('preset-desc');
-            if (descEl) descEl.innerText = preset ? preset.label : '';
-        });
-
-        // Loop execution hooks
-        fetchModels();
-        loadConfigs();
-        pollTelemetry();
-        setInterval(pollTelemetry, 3000);
-    </script>
-</body>
-</html>"""
-    return HTMLResponse(content=html_content)
+@router.get("/api/dev/payloads")
+async def get_dev_payloads(
+    limit: int = 20,
+    page: int = 1,
+    query: str = ""
+) -> JSONResponse:
+    """Return captured dev mode request & response payloads for inspection with server-side query filtering and RAM-saving pagination."""
+    res = stats.get_paginated_payloads(limit=limit, page=page, query=query)
+    return JSONResponse(content=res)
+
+
+@router.get("/api/dev/payloads/{req_id}")
+async def get_single_dev_payload(req_id: str) -> JSONResponse:
+    """Return a single captured request payload by ID."""
+    recent_dicts = stats.get_recent_dicts(include_payload=True)
+    for p in recent_dicts:
+        if p.get("id") == req_id:
+            return JSONResponse(content=p)
+    return JSONResponse(content={"error": "Not found"}, status_code=404)
+
+
+@router.get("/api/dev/raw-logs")
+async def get_raw_dev_logs() -> Response:
+    """Return raw persisted .development/requests.jsonl log contents."""
+    log_file = Path(__file__).parent.parent / ".development" / "requests.jsonl"
+    if not log_file.exists():
+        return Response(content="", media_type="text/plain")
+    return Response(content=log_file.read_text(encoding="utf-8"), media_type="text/plain")

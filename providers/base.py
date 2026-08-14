@@ -48,8 +48,14 @@ class BaseProvider(ABC):
         messages: list[dict[str, Any]],
         system: str | list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
-        """Translate Anthropic messages and system prompt to OpenAI chat message list."""
-        openai_messages = []
+        """Translate Anthropic messages and system prompt to OpenAI chat message list.
+
+        Includes Heuristic Synthetic Tool Call Injection:
+        If a user message contains tool_result blocks, checks preceding assistant message.
+        If preceding assistant message lacks matching tool_calls, injects synthetic tool_call
+        to satisfy upstream provider (NVIDIA NIM / OpenRouter / DeepSeek) schema validations.
+        """
+        raw_openai_messages = []
 
         # Handle system prompt mapping
         if system:
@@ -64,7 +70,7 @@ class BaseProvider(ABC):
             else:
                 system_text = str(system)
             if system_text:
-                openai_messages.append({"role": "system", "content": system_text})
+                raw_openai_messages.append({"role": "system", "content": system_text})
 
         for msg in messages:
             role = msg.get("role")
@@ -72,7 +78,7 @@ class BaseProvider(ABC):
             role_str = str(role or "user")
 
             if isinstance(content, str):
-                openai_messages.append({"role": role_str, "content": content})
+                raw_openai_messages.append({"role": role_str, "content": content})
                 continue
 
             if isinstance(content, list):
@@ -124,11 +130,76 @@ class BaseProvider(ABC):
                         msg_obj["content"] = content_str
                     if tool_calls:
                         msg_obj["tool_calls"] = tool_calls
-                    openai_messages.append(msg_obj)
+                    raw_openai_messages.append(msg_obj)
                 elif role_str == "user":
                     if content_str:
-                        openai_messages.append({"role": "user", "content": content_str})
+                        raw_openai_messages.append({"role": "user", "content": content_str})
                     if tool_results:
-                        openai_messages.extend(tool_results)
+                        raw_openai_messages.extend(tool_results)
 
-        return openai_messages
+        # ---------------------------------------------------------------------
+        # Post-Processing Pass: Synthetic Tool Call Injection & Schema Fixing
+        # ---------------------------------------------------------------------
+        final_messages: list[dict[str, Any]] = []
+
+        for msg in raw_openai_messages:
+            if msg.get("role") == "tool":
+                tool_call_id = msg.get("tool_call_id") or f"toolu_{uuid.uuid4().hex[:8]}"
+                tool_name = msg.get("name") or "bash"
+                msg["tool_call_id"] = tool_call_id
+
+                # Find preceding assistant message
+                preceding_assistant = None
+                for prev in reversed(final_messages):
+                    if prev.get("role") == "assistant":
+                        preceding_assistant = prev
+                        break
+
+                if preceding_assistant is not None:
+                    existing_calls = preceding_assistant.get("tool_calls", [])
+                    has_match = any(
+                        isinstance(c, dict) and c.get("id") == tool_call_id
+                        for c in existing_calls
+                    )
+                    if not has_match:
+                        synthetic_call = {
+                            "id": tool_call_id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": "{}",
+                            },
+                        }
+                        if "tool_calls" not in preceding_assistant:
+                            preceding_assistant["tool_calls"] = []
+                        preceding_assistant["tool_calls"].append(synthetic_call)
+                else:
+                    synthetic_assistant = {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": tool_call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": "{}",
+                                },
+                            }
+                        ],
+                    }
+                    final_messages.append(synthetic_assistant)
+
+                if not msg.get("content"):
+                    msg["content"] = "Tool execution completed."
+
+            final_messages.append(msg)
+
+        # Clean up empty content fields on assistant messages with tool_calls
+        for msg in final_messages:
+            if msg.get("role") == "assistant" and msg.get("tool_calls") and msg.get("content") == "":
+                msg["content"] = None
+
+
+        return final_messages
+

@@ -1,11 +1,13 @@
-from typing import Any
+import time
 
 import pytest
 
 from api.mock import check_mock_request, extract_command_prefix, extract_filepaths
-from api.stream_transformer import (
+from core.transformer.stream_engine import (
     SSEStreamTransformer,
-    parse_heuristic_tool_call,
+    extract_all_json_tool_calls,
+    extract_json_tool_call,
+    safe_parse_json,
     translate_non_stream_response,
 )
 from providers.base import BaseProvider
@@ -36,14 +38,15 @@ def test_base_provider_translations() -> None:
     assert len(openai_tools) == 1
     assert openai_tools[0]["type"] == "function"
     assert openai_tools[0]["function"]["name"] == "run_command"
+    assert openai_tools[0]["function"]["parameters"]["required"] == ["cmd"]
 
-    # 2. Test messages translation with system prompt
-    messages: list[dict[str, Any]] = [
+    # 2. Test messages translation
+    anthropic_messages = [
         {"role": "user", "content": "Hello"},
         {
             "role": "assistant",
             "content": [
-                {"type": "text", "text": "Ok"},
+                {"type": "text", "text": "Sure"},
                 {
                     "type": "tool_use",
                     "id": "tool_1",
@@ -55,19 +58,13 @@ def test_base_provider_translations() -> None:
         {
             "role": "user",
             "content": [
-                {
-                    "type": "tool_result",
-                    "tool_use_id": "tool_1",
-                    "content": "success",
-                    "is_error": False,
-                }
+                {"type": "tool_result", "tool_use_id": "tool_1", "content": "success"}
             ],
         },
     ]
-    system = "You are a proxy"
-    translated = provider.translate_messages(messages, system)
-
-    assert len(translated) == 4
+    translated = provider.translate_messages(
+        anthropic_messages, system="You are a proxy"
+    )
     assert translated[0]["role"] == "system"
     assert translated[0]["content"] == "You are a proxy"
     assert translated[1]["role"] == "user"
@@ -127,37 +124,232 @@ def test_filepaths_extraction() -> None:
     assert "config/settings.json" in paths
 
 
-def test_heuristic_tool_call_parser() -> None:
-    # Text with markdown JSON tool call
-    text = (
-        "Let me run this command.\n"
-        "```json\n"
-        "{\n"
-        '  "name": "default_api:run_command",\n'
-        '  "arguments": {\n'
-        '    "CommandLine": "git diff"\n'
-        "  }\n"
-        "}\n"
-        "```"
+def test_safe_parse_json_multiline_code() -> None:
+    """Test that multiline code containing literal unescaped newlines is parsed cleanly."""
+    json_with_literal_newlines = (
+        '{\n'
+        '  "name": "Write",\n'
+        '  "parameters": {\n'
+        '    "file_path": "src/components/Anasayfa.js",\n'
+        '    "content": "import React from \'react\';\n\nconst Anasayfa = () => {\n  return (\n    <div>\n      <h1>Merhaba, Bekir Görmez!</h1>\n    </div>\n  );\n};\n\nexport default Anasayfa;"\n'
+        '  }\n'
+        '}'
     )
-    clean, tool = parse_heuristic_tool_call(text)
-    assert tool is not None
-    assert clean == "Let me run this command."
-    assert tool["name"] == "default_api:run_command"
-    assert tool["input"]["CommandLine"] == "git diff"
+    parsed = safe_parse_json(json_with_literal_newlines)
+    assert parsed is not None
+    assert parsed["name"] == "Write"
+    content = parsed["parameters"]["content"]
+    assert "import React from 'react';" in content
+    assert "Bekir Görmez" in content
+    assert len(content.splitlines()) > 5
 
-    # Text with MCP slash command
-    mcp_text = (
-        "I'll generate the screen using MCP.\n"
-        '/mcp__stitch__generate_screen_from_text "Login form with email and password"'
+    # Test extraction
+    remaining, tools = extract_all_json_tool_calls(json_with_literal_newlines)
+    assert len(tools) == 1
+    assert tools[0]["name"] == "Write"
+    assert tools[0]["input"]["file_path"] == "src/components/Anasayfa.js"
+    assert "Bekir Görmez" in tools[0]["input"]["content"]
+
+
+def test_extract_json_tool_call() -> None:
+    # Single tool call
+    json_text = '{"name": "Write", "parameters": {"file_path": "test.js", "content": "hello"}}'
+    prefix, tool = extract_json_tool_call(json_text)
+    assert tool is not None
+    assert tool["name"] == "Write"
+    assert tool["input"]["file_path"] == "test.js"
+
+
+def test_extract_all_json_tool_calls_multi() -> None:
+    """LLM outputs multiple Write/Read JSON tool calls in text — the exact user bug."""
+    llm_text = (
+        "Özür dilerim, değişiklikleri yapıyorum. "
+        '```json\n{"name": "Write", "parameters": {"file_path": "src/Anasayfa.js", "content": "hello"}}\n```'
+        " "
+        '```json\n{"name": "Read", "parameters": {"file_path": "src/Anasayfa.js"}}\n```'
+        " "
+        '```json\n{"name": "Write", "parameters": {"file_path": "src/Hakkinda.js", "content": "about"}}\n```'
     )
-    clean_mcp, tool_mcp = parse_heuristic_tool_call(mcp_text)
-    # Text with /graphify slash command
-    graphify_text = "Updating design graph.\n/graphify"
-    clean_g, tool_g = parse_heuristic_tool_call(graphify_text)
-    assert tool_g is not None
-    assert clean_g == "Updating design graph."
-    assert tool_g["name"] == "graphify"
+    remaining, tools = extract_all_json_tool_calls(llm_text)
+    assert len(tools) == 3
+    assert tools[0]["name"] == "Write"
+    assert tools[0]["input"]["file_path"] == "src/Anasayfa.js"
+    assert tools[1]["name"] == "Read"
+    assert tools[1]["input"]["file_path"] == "src/Anasayfa.js"
+    assert tools[2]["name"] == "Write"
+    assert tools[2]["input"]["file_path"] == "src/Hakkinda.js"
+    # Remaining text should be just the Turkish prefix
+    assert "Özür" in remaining
+    assert '"name"' not in remaining
+
+    # Non-stream response translation with multiple tools
+    openai_resp = {
+        "id": "chatcmpl-multi",
+        "model": "meta/llama-3.1-70b-instruct",
+        "choices": [{"message": {"role": "assistant", "content": llm_text}, "finish_reason": "stop"}],
+    }
+    translated = translate_non_stream_response(openai_resp)
+    assert translated["stop_reason"] == "tool_use"
+    tool_blocks = [b for b in translated["content"] if b["type"] == "tool_use"]
+    assert len(tool_blocks) == 3
+
+
+@pytest.mark.asyncio
+async def test_streaming_text_embedded_tool_extraction() -> None:
+    """When LLM streams tool calls as text, they should be extracted post-stream."""
+    transformer = SSEStreamTransformer(target_model="meta/llama-3.1-70b-instruct")
+
+    async def mock_stream():
+        yield {"choices": [{"delta": {"role": "assistant"}}]}
+        # LLM streams text that contains a JSON tool call
+        yield {"choices": [{"delta": {"content": 'I will write the file.\n```json\n{"name": "Write",'}}]}
+        yield {"choices": [{"delta": {"content": ' "parameters": {"file_path": "app.js", "content": "code"}}\n```'}}]}
+        yield {"choices": [{"finish_reason": "stop"}]}
+
+    events = []
+    async for event in transformer.transform(mock_stream()):
+        events.append(event)
+
+    full_output = "".join(events)
+    # The text was streamed as text_delta, but tool_use blocks should also appear
+    assert '"type": "tool_use"' in full_output
+    assert '"name": "Write"' in full_output
+    assert '"stop_reason": "tool_use"' in full_output
+    summary = transformer.get_summary_response()
+    assert summary["stop_reason"] == "tool_use"
+    assert any(b["type"] == "tool_use" and b["name"] == "Write" for b in summary["content"])
+
+
+
+
+@pytest.mark.asyncio
+async def test_native_multi_tool_call_stream_transformer() -> None:
+    """Test native OpenAI streaming with multiple tool calls across different indexes."""
+    transformer = SSEStreamTransformer(target_model="meta/llama-3.1-70b-instruct")
+
+    async def mock_openai_stream():
+        yield {"choices": [{"delta": {"role": "assistant"}}]}
+        # Tool 0: Write
+        yield {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "chatcmpl-tool-1",
+                                "type": "function",
+                                "function": {"name": "Write", "arguments": '{"file_path": "Anasayfa.js", '},
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        yield {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {"arguments": '"content": "import React from \\"react\\";"}'},
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        # Tool 1: Read
+        yield {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 1,
+                                "id": "chatcmpl-tool-2",
+                                "type": "function",
+                                "function": {"name": "Read", "arguments": '{"file_path": "Anasayfa.js"}'},
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        yield {"choices": [{"finish_reason": "tool_calls"}]}
+
+    events = []
+    async for event in transformer.transform(mock_openai_stream()):
+        events.append(event)
+
+    full_output = "".join(events)
+    assert '"id": "chatcmpl-tool-1"' in full_output
+    assert '"id": "chatcmpl-tool-2"' in full_output
+    assert '"name": "Write"' in full_output
+    assert '"name": "Read"' in full_output
+
+    summary = transformer.get_summary_response()
+    assert summary["stop_reason"] == "tool_use"
+    tool_blocks = [b for b in summary["content"] if b["type"] == "tool_use"]
+    assert len(tool_blocks) == 2
+    assert tool_blocks[0]["name"] == "Write"
+    assert tool_blocks[0]["input"]["content"] == 'import React from "react";'
+    assert tool_blocks[1]["name"] == "Read"
+    assert tool_blocks[1]["input"]["file_path"] == "Anasayfa.js"
+@pytest.mark.asyncio
+async def test_native_tool_call_stream_transformer() -> None:
+    transformer = SSEStreamTransformer(target_model="meta/llama-3.1-70b-instruct")
+
+    async def mock_openai_stream():
+        yield {"choices": [{"delta": {"role": "assistant"}}]}
+        yield {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_abc123",
+                                "type": "function",
+                                "function": {"name": "run_command", "arguments": '{"CommandLine":'},
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        yield {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {"arguments": ' "git status"}'},
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        yield {"choices": [{"finish_reason": "tool_calls"}]}
+
+    events = []
+    async for event in transformer.transform(mock_openai_stream()):
+        events.append(event)
+
+    full_output = "".join(events)
+    assert "event: message_start" in full_output
+    assert "event: content_block_start" in full_output
+    assert '"type": "tool_use"' in full_output
+    assert '"name": "run_command"' in full_output
+    assert '"id": "call_abc123"' in full_output
+    assert '"stop_reason": "tool_use"' in full_output
+    summary = transformer.get_summary_response()
+    assert summary["stop_reason"] == "tool_use"
+    assert summary["content"][0]["type"] == "tool_use"
+    assert summary["content"][0]["input"] == {"CommandLine": "git status"}
 
 
 def test_non_stream_response_translation() -> None:
@@ -248,6 +440,29 @@ def test_dashboard_endpoints() -> None:
     assert resp.status_code == 200
     res_data = resp.json()
     assert "configs" in res_data
+
+    # 3. Test GET /api/dev/payloads
+    stats.record_log(
+        method="POST",
+        path="/v1/messages",
+        client_model="claude-3-5-sonnet",
+        mapped_model="nvidia_nim/meta/llama-3.1-70b-instruct",
+        status_code=200,
+        start_time=time.time(),
+        request_body={"model": "claude-3-5-sonnet", "messages": [{"role": "user", "content": "hello"}]},
+        response_body={"id": "msg_123", "content": [{"type": "text", "text": "hi"}]},
+    )
+    resp = client.get("/api/dev/payloads")
+    assert resp.status_code == 200
+    payload_data = resp.json()
+    assert payload_data["total_captured"] > 0
+    assert "payloads" in payload_data
+
+    first_req_id = payload_data["payloads"][0]["id"]
+    resp_single = client.get(f"/api/dev/payloads/{first_req_id}")
+    assert resp_single.status_code == 200
+    single_data = resp_single.json()
+    assert single_data["request_body"]["model"] == "claude-3-5-sonnet"
     assert "key_statuses" in res_data
     assert "MODEL_OPUS" in res_data["configs"]
     assert "OPENROUTER_API_KEY" in res_data["configs"]
@@ -278,7 +493,7 @@ def test_gateway_auth_token_enforced() -> None:
 
     client = TestClient(app, raise_server_exceptions=False)
 
-    with patch("api.routes.settings") as mock_settings:
+    with patch("core.gateway.settings") as mock_settings:
         mock_settings.GATEWAY_AUTH_TOKEN = "my-secret-token"
         mock_settings.PROVIDER_RATE_LIMIT = 100
         mock_settings.PROVIDER_RATE_WINDOW = 60
@@ -321,7 +536,7 @@ def test_gateway_auth_token_disabled() -> None:
 
     client = TestClient(app, raise_server_exceptions=False)
 
-    with patch("api.routes.settings") as mock_settings:
+    with patch("core.gateway.settings") as mock_settings:
         mock_settings.GATEWAY_AUTH_TOKEN = ""  # Disabled
         mock_settings.PROVIDER_RATE_LIMIT = 100
         mock_settings.PROVIDER_RATE_WINDOW = 60
@@ -329,9 +544,9 @@ def test_gateway_auth_token_disabled() -> None:
 
         # Request with no auth header should pass through (no 401)
         with (
-            patch("api.routes.rate_limiter") as mock_rl,
-            patch("api.routes.provider") as mock_provider,
-            patch("api.routes.concurrency_semaphore"),
+            patch("core.gateway.rate_limiter") as mock_rl,
+            patch("core.gateway.provider") as mock_provider,
+            patch("core.gateway.concurrency_semaphore"),
         ):
             mock_rl.acquire = AsyncMock(return_value=True)
             mock_provider.complete = AsyncMock(
@@ -365,7 +580,7 @@ def test_gateway_auth_token_disabled() -> None:
 @pytest.mark.asyncio
 async def test_circuit_breaker_state_machine() -> None:
     """CLOSED → OPEN after failure_threshold failures."""
-    from router.circuit_breaker import CircuitBreaker
+    from core.router.circuit_breaker import CircuitBreaker
 
     cb = CircuitBreaker("test-model", failure_threshold=3, recovery_timeout=999)
 
@@ -386,7 +601,7 @@ async def test_circuit_breaker_half_open_recovery() -> None:
     """OPEN → HALF_OPEN after timeout → CLOSED after success."""
     import time
 
-    from router.circuit_breaker import CircuitBreaker, CircuitState
+    from core.router.circuit_breaker import CircuitBreaker, CircuitState
 
     cb = CircuitBreaker("test-model", failure_threshold=1, recovery_timeout=0.05)
 
@@ -411,7 +626,7 @@ async def test_circuit_breaker_half_open_failure_reopens() -> None:
     """HALF_OPEN + failure → back to OPEN."""
     import time
 
-    from router.circuit_breaker import CircuitBreaker, CircuitState
+    from core.router.circuit_breaker import CircuitBreaker, CircuitState
 
     cb = CircuitBreaker("test-model", failure_threshold=1, recovery_timeout=0.05)
     await cb.record_failure()
@@ -430,7 +645,7 @@ async def test_circuit_breaker_half_open_failure_reopens() -> None:
 
 def test_rate_limit_parser_headers() -> None:
     """Headers parsed correctly and headroom computed."""
-    from router.rate_limit_parser import RateLimitState
+    from core.router.rate_limiter import RateLimitState
 
     state = RateLimitState("test-model")
 
@@ -450,7 +665,7 @@ def test_rate_limit_parser_headers() -> None:
 
 def test_rate_limit_parser_no_headroom() -> None:
     """Near-exhausted quota → no headroom."""
-    from router.rate_limit_parser import RateLimitState
+    from core.router.rate_limiter import RateLimitState
 
     state = RateLimitState("test-model")
     state.update(
@@ -464,7 +679,7 @@ def test_rate_limit_parser_no_headroom() -> None:
 
 def test_rate_limit_parser_missing_headers() -> None:
     """No headers → headroom defaults to True (permissive)."""
-    from router.rate_limit_parser import RateLimitState
+    from core.router.rate_limiter import RateLimitState
 
     state = RateLimitState("unknown-model")
     assert state.has_headroom()  # No info → assume OK
@@ -480,8 +695,9 @@ async def test_model_router_fallback() -> None:
     """Primary with open CB → router picks fallback."""
     from unittest.mock import AsyncMock, patch
 
-    from router.circuit_breaker import CircuitBreakerRegistry
-    from router.model_router import ModelRouter
+    from core.router.circuit_breaker import CircuitBreakerRegistry
+    from core.router.selector import ModelSelector as ModelRouter
+
 
     # Fresh registry
     fresh_registry = CircuitBreakerRegistry()
@@ -495,10 +711,11 @@ async def test_model_router_fallback() -> None:
     router = ModelRouter()
 
     with (
-        patch("router.model_router.circuit_breaker_registry", fresh_registry),
+        patch("core.router.selector.circuit_breaker_registry", fresh_registry),
         patch(
-            "guards.preflight.preflight_model_probe", new=AsyncMock(return_value=True)
+            "atomic.guards.preflight.preflight_model_probe", new=AsyncMock(return_value=True)
         ),
+
         patch.object(
             router, "_get_preflight", return_value=AsyncMock(return_value=True)
         ),
@@ -513,8 +730,10 @@ async def test_model_router_all_unavailable() -> None:
     """All models CB open → AllModelsUnavailableError raised."""
     from unittest.mock import patch
 
-    from router.circuit_breaker import CircuitBreakerRegistry
-    from router.model_router import AllModelsUnavailableError, ModelRouter
+    from core.router.circuit_breaker import CircuitBreakerRegistry
+    from core.router.selector import AllModelsUnavailableError
+    from core.router.selector import ModelSelector as ModelRouter
+
 
     fresh_registry = CircuitBreakerRegistry()
     router = ModelRouter()
@@ -523,7 +742,7 @@ async def test_model_router_all_unavailable() -> None:
         return False
 
     with (
-        patch("router.model_router.circuit_breaker_registry", fresh_registry),
+        patch("core.router.selector.circuit_breaker_registry", fresh_registry),
         patch.object(router, "_get_preflight", return_value=_always_false),
         patch.object(router, "_is_available", return_value=True),
         pytest.raises(AllModelsUnavailableError),
@@ -538,8 +757,9 @@ async def test_model_router_all_unavailable() -> None:
 
 def test_token_budget_guard_no_truncation() -> None:
     """Short messages should not be truncated."""
+    from atomic.guards.token_budget import TokenBudgetGuard
     from config import ModelMetadata
-    from guards.token_budget import TokenBudgetGuard
+
 
     guard = TokenBudgetGuard.__new__(TokenBudgetGuard)
     import tiktoken
@@ -557,8 +777,9 @@ def test_token_budget_guard_no_truncation() -> None:
 
 def test_token_budget_guard_truncation() -> None:
     """Many messages over context limit should be truncated."""
+    from atomic.guards.token_budget import TokenBudgetGuard
     from config import ModelMetadata
-    from guards.token_budget import TokenBudgetGuard
+
 
     guard = TokenBudgetGuard.__new__(TokenBudgetGuard)
     import tiktoken
@@ -596,7 +817,8 @@ def test_token_budget_guard_truncation() -> None:
 @pytest.mark.asyncio
 async def test_stream_guard_normal_flow() -> None:
     """Normal stream passes through without modification."""
-    from guards.stream_guard import StreamGuard
+    from atomic.guards.stream_guard import StreamGuard
+
 
     async def normal_stream():
         for chunk in ["data: chunk1\n\n", "data: chunk2\n\n", "data: done\n\n"]:
@@ -615,7 +837,8 @@ async def test_stream_guard_timeout() -> None:
     """Slow stream that exceeds timeout yields an SSE error event."""
     import asyncio
 
-    from guards.stream_guard import StreamGuard
+    from atomic.guards.stream_guard import StreamGuard
+
 
     async def slow_stream():
         yield "data: first\n\n"
@@ -635,7 +858,8 @@ async def test_stream_guard_timeout() -> None:
 @pytest.mark.asyncio
 async def test_stream_guard_empty_chunk_stall() -> None:
     """Excessive empty chunks triggers stall detection."""
-    from guards.stream_guard import StreamGuard
+    from atomic.guards.stream_guard import StreamGuard
+
 
     async def empty_stream():
         for _ in range(15):  # > max_empty_chunks=5
@@ -665,7 +889,7 @@ def test_gateway_auth_x_api_key_header() -> None:
 
     client = TestClient(app, raise_server_exceptions=False)
 
-    with patch("api.routes.settings") as mock_settings:
+    with patch("core.gateway.settings") as mock_settings:
         mock_settings.GATEWAY_AUTH_TOKEN = "fcc-claude"
         mock_settings.PROVIDER_RATE_LIMIT = 100
         mock_settings.PROVIDER_RATE_WINDOW = 60
@@ -695,7 +919,7 @@ def test_count_tokens_endpoint() -> None:
 
     client = TestClient(app)
 
-    with patch("api.routes.settings") as mock_settings:
+    with patch("core.gateway.settings") as mock_settings:
         mock_settings.GATEWAY_AUTH_TOKEN = "fcc-claude"
 
         resp = client.post(
@@ -724,7 +948,7 @@ def test_list_v1_models_endpoint() -> None:
 
     client = TestClient(app)
 
-    with patch("api.routes.settings") as mock_settings:
+    with patch("core.gateway.settings") as mock_settings:
         mock_settings.GATEWAY_AUTH_TOKEN = "fcc-claude"
 
         resp = client.get(
@@ -746,9 +970,12 @@ def test_in_flight_429_auto_retry_fallback() -> None:
     import httpx
     from fastapi.testclient import TestClient
 
+    from core.router.rate_limiter import rate_limit_parser
     from server import app
 
+    rate_limit_parser._states.clear()
     client = TestClient(app, raise_server_exceptions=False)
+
 
     async def mock_complete(model, *args, **kwargs):
         if "llama-3.1-70b-instruct" in model:
@@ -769,9 +996,9 @@ def test_in_flight_429_auto_retry_fallback() -> None:
         )
 
     with (
-        patch("api.routes.settings") as mock_settings,
-        patch("api.routes.provider") as mock_provider,
-        patch("guards.preflight.preflight_model_probe", new=AsyncMock(return_value=True)),
+        patch("core.gateway.settings") as mock_settings,
+        patch("core.gateway.provider") as mock_provider,
+        patch("atomic.guards.preflight.preflight_model_probe", new=AsyncMock(return_value=True)),
     ):
         mock_settings.GATEWAY_AUTH_TOKEN = ""
         mock_settings.PROVIDER_RATE_LIMIT = 100
@@ -809,5 +1036,61 @@ def test_multi_key_rotation() -> None:
     # Single key compatibility
     single_key = "  nvapi-single-key  "
     assert _select_key(single_key, "single_prov") == "nvapi-single-key"
+
+
+def test_model_registry_custom_primary_and_empty_fallbacks() -> None:
+    """Test that ModelRegistry respects user settings over static models.yaml defaults and respects empty fallback lists."""
+    from config import model_registry, settings
+
+    # 1. Custom primary model from settings
+    settings.MODEL_OPUS = "open_router/google/gemini-2.5-pro"
+    assert model_registry.get_primary("claude-3-opus") == "open_router/google/gemini-2.5-pro"
+
+    # 2. Direct provider model path pass-through
+    assert model_registry.get_primary("open_router/deepseek/deepseek-chat") == "open_router/deepseek/deepseek-chat"
+    assert model_registry.get_fallbacks("open_router/deepseek/deepseek-chat") == []
+
+    # 3. Empty fallback list behavior
+    model_registry._entries["claude_opus"].fallback_order = []
+    assert model_registry.get_fallbacks("claude-3-opus") == []
+
+
+def test_synthetic_tool_call_injection_verification_turn() -> None:
+    """Test that BaseProvider.translate_messages injects synthetic tool_calls into preceding assistant messages when tool_results are present."""
+    from providers.openai import OpenAICompatibleProvider
+
+    prov = OpenAICompatibleProvider()
+
+    # Simulating Turn 2 Anthropic message history where Turn 1 was a Heuristic Tool Call (assistant returned flat text, CLI returns tool_result)
+    messages = [
+        {"role": "user", "content": "list files"},
+        {"role": "assistant", "content": "I will run bash command for you."},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_abc123",
+                    "name": "bash",
+                    "content": "file1.txt\nfile2.txt",
+                }
+            ],
+        },
+    ]
+
+    openai_msgs = prov.translate_messages(messages)
+
+    # Verify assistant message now has synthetic tool_calls with id toolu_abc123
+    assistant_msg = [m for m in openai_msgs if m["role"] == "assistant"][0]
+    assert "tool_calls" in assistant_msg
+    assert assistant_msg["tool_calls"][0]["id"] == "toolu_abc123"
+    assert assistant_msg["tool_calls"][0]["function"]["name"] == "bash"
+
+    # Verify tool message has tool_call_id toolu_abc123
+    tool_msg = [m for m in openai_msgs if m["role"] == "tool"][0]
+    assert tool_msg["tool_call_id"] == "toolu_abc123"
+    assert tool_msg["content"] == "file1.txt\nfile2.txt"
+
+
 
 
