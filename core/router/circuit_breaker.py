@@ -213,8 +213,10 @@ class CircuitBreakerRegistry:
     def all_statuses(self) -> dict[str, dict[str, object]]:
         return {mid: cb.status_dict() for mid, cb in self._breakers.items()}
 
-    def save_to_file(self) -> None:
+    def save_to_file(self, force: bool = False) -> None:
         """Persist active OPEN circuit breakers to storage file."""
+        if "PYTEST_CURRENT_TEST" in os.environ and not force:
+            return
         try:
             os.makedirs(os.path.dirname(STORAGE_FILE), exist_ok=True)
             data: dict[str, Any] = {}
@@ -236,9 +238,9 @@ class CircuitBreakerRegistry:
         except Exception as e:
             logger.warning(f"Failed to persist circuit breaker states: {e}")
 
-    def _load_from_file(self) -> None:
+    def _load_from_file(self, force: bool = False) -> None:
         """Load and restore persisted OPEN circuit breaker states from storage file."""
-        if not os.path.exists(STORAGE_FILE):
+        if ("PYTEST_CURRENT_TEST" in os.environ and not force) or not os.path.exists(STORAGE_FILE):
             return
         try:
             with open(STORAGE_FILE, encoding="utf-8") as f:

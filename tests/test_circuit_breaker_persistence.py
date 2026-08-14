@@ -22,6 +22,7 @@ def test_circuit_breaker_started_at_and_expired_at_persistence() -> None:
     now = time.time()
     # Trip breaker for 300 seconds (5 min)
     cb1.trip_or_extend("Test persistent failure")
+    registry1.save_to_file(force=True)
 
     assert cb1.state == CircuitState.OPEN
     assert cb1.started_at is not None
@@ -29,11 +30,12 @@ def test_circuit_breaker_started_at_and_expired_at_persistence() -> None:
     assert cb1.started_at >= now - 5
     assert cb1.expired_at == cb1.started_at + 60.0  # First trip recovery timeout
 
-    # Verify JSON file was created
+    # Verify storage file was created
     assert os.path.exists(STORAGE_FILE)
 
     # Re-initialize a new registry simulating a server restart
     registry2 = CircuitBreakerRegistry()
+    registry2._load_from_file(force=True)
     cb2 = registry2.get("test_provider/persist_model")
 
     # Verify state was restored with exact wall-clock expiration

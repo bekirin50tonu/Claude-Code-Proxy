@@ -40,6 +40,8 @@ class LiveBridgeManager:
 
     def save_state(self) -> None:
         """Save active watchers and workspace settings to .data/telegram_state.yaml."""
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
         try:
             os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
             data = {
@@ -53,7 +55,7 @@ class LiveBridgeManager:
 
     def load_state(self) -> None:
         """Load active watchers and workspace settings from .data/telegram_state.yaml."""
-        if not os.path.exists(STATE_FILE):
+        if "PYTEST_CURRENT_TEST" in os.environ or not os.path.exists(STATE_FILE):
             return
         try:
             with open(STATE_FILE, encoding="utf-8") as f:
@@ -230,14 +232,49 @@ class LiveBridgeManager:
             details_lines.append(f"⚙️ *Executed Command:* `{esc_cmd}`")
 
         msg_text = "\n".join(details_lines)
+
+        for cid in list(watchers):
+            try:
+                await app.bot.send_message(
+                    chat_id=cid,
+                    text=msg_text,
+                    parse_mode="MarkdownV2",
+                )
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "chat not found" in err_msg or "forbidden" in err_msg or "user is deactivated" in err_msg:
+                    logger.warning(f"Pruning invalid watcher {cid}: {e}")
+                    self.active_watchers.discard(cid)
+                    self.save_state()
+                else:
+                    logger.warning(f"Failed to dispatch tool call notification to {cid}: {e}")
+
+    async def dispatch_prompt_question(
+        self,
+        session_id: str | None,
+        question: str,
+    ) -> None:
+        """Send explicit prompt question/confirmation from Claude Code to Telegram with interactive reply buttons."""
+        watchers = self.get_watchers()
+        if not watchers or not question:
+            return
+
+        from bot.factory import bot_factory
+        tg_adapter = bot_factory.get_adapter("telegram")
+        if not tg_adapter or not getattr(tg_adapter, "app", None):
+            return
+
+        app = tg_adapter.app
         sid = session_id or "default_session"
+        esc_q = escape_markdown_v2(question, is_code_block=False)
+        msg_text = f"❓ *Claude Code Question:*\n\n{esc_q}\n\n💡 _Reply to this message with text or use buttons below:_"
 
         try:
             from telegram import InlineKeyboardButton, InlineKeyboardMarkup
             keyboard = [
                 [
-                    InlineKeyboardButton("✅ Approve (Y)", callback_data=f"prompt_reply:{sid}:y"),
-                    InlineKeyboardButton("❌ Reject (N)", callback_data=f"prompt_reply:{sid}:n"),
+                    InlineKeyboardButton("✅ Yes (Y)", callback_data=f"prompt_reply:{sid}:y"),
+                    InlineKeyboardButton("❌ No (N)", callback_data=f"prompt_reply:{sid}:n"),
                 ]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -253,7 +290,11 @@ class LiveBridgeManager:
                     reply_markup=reply_markup,
                 )
             except Exception as e:
-                logger.warning(f"Failed to dispatch tool call notification to {cid}: {e}")
+                err_msg = str(e).lower()
+                if "chat not found" in err_msg or "forbidden" in err_msg:
+                    self.active_watchers.discard(cid)
+                    self.save_state()
+                logger.warning(f"Failed to dispatch prompt question to {cid}: {e}")
 
     def record_user_response(self, session_id: str, response: str) -> None:
         """Record user approval / response for an active session from Telegram."""
