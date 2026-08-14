@@ -184,6 +184,7 @@ class CircuitBreakerRegistry:
         self._breakers: dict[str, CircuitBreaker] = {}
         self._trip_callbacks: list[object] = []
         self._load_from_file()
+        self.save_to_file()
 
     def register_trip_callback(self, callback: object) -> None:
         """Register a callback function (sync or async) invoked when any circuit breaker trips OPEN."""
