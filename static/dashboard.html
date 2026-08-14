@@ -301,20 +301,21 @@
 
                     <!-- Detailed Models Health & Circuit Breaker Table -->
                     <h3 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">Upstream Model Health &amp; Circuit Breaker Details</h3>
-                    <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+                    <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow-x: auto; max-width: 100%; width: 100%;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left; table-layout: auto;">
                             <thead>
                                 <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px;">
                                     <th style="padding: 0.75rem 1rem;">Model Target ID</th>
                                     <th style="padding: 0.75rem 1rem;">Circuit State &amp; Recovery Timer</th>
                                     <th style="padding: 0.75rem 1rem;">Last Failure Cause</th>
-                                    <th style="padding: 0.75rem 1rem;">Failures</th>
+                                    <th style="padding: 0.75rem 1rem; text-align: center;">Failures</th>
                                     <th style="padding: 0.75rem 1rem;">Quota Headroom</th>
                                     <th style="padding: 0.75rem 1rem;">Remaining Req / Tok</th>
+                                    <th style="padding: 0.75rem 1rem; text-align: right;">Circuit Action</th>
                                 </tr>
                             </thead>
                             <tbody id="router-table-body">
-                                <tr><td colspan="6" style="padding: 1rem; text-align: center; color: var(--text-muted);">Loading router health matrix...</td></tr>
+                                <tr><td colspan="7" style="padding: 1rem; text-align: center; color: var(--text-muted);">Loading router health matrix...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -342,8 +343,8 @@
                             <input type="text" id="dev-search-input" placeholder="Filter payloads by model, status, path..." style="padding: 0.5rem 0.85rem; font-size: 0.75rem; background: #050608; border: 1px solid var(--border-subtle); border-radius: 6px; color: white; width: 320px;" oninput="onDevSearchInput(this.value)">
                             <button type="button" class="btn-alt" onclick="fetchDevPayloads()" style="padding: 0.4rem 1rem; font-size: 0.75rem;">Refresh Feed</button>
                         </div>
-                        <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
-                            <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+                        <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow-x: auto; max-width: 100%; width: 100%;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left; table-layout: auto;">
                                 <thead>
                                     <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px;">
                                         <th style="padding: 0.75rem 1rem;">Time</th>
@@ -386,8 +387,8 @@
 
                     <!-- Sub-tab 2: Live Request Trace Feed -->
                     <div id="dev-subtab-trace" style="display: none;">
-                        <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
-                            <table class="feed-table" style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+                        <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow-x: auto; max-width: 100%; width: 100%;">
+                            <table class="feed-table" style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left; table-layout: auto;">
                                 <thead>
                                     <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px;">
                                         <th style="padding: 0.75rem 1rem;">Time</th>

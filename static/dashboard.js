@@ -401,15 +401,15 @@ async function fetchRouterStatus() {
             const causeText = cb.last_failure_reason || 'None (Operational)';
 
             tr.innerHTML = `
-                <td style="padding: 0.75rem 1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">${modelId}</td>
-                <td style="padding: 0.75rem 1rem;"><span style="color: ${stateColor}; font-weight: 700; font-size: 0.7rem;">${stateDisplay}</span></td>
-                <td style="padding: 0.75rem 1rem; color: ${cb.state === 'open' ? '#f87171' : 'var(--text-muted)'}; font-size: 0.72rem;">${causeText}</td>
-                <td style="padding: 0.75rem 1rem; color: var(--text-muted);">${cb.failure_count || 0}</td>
-                <td style="padding: 0.75rem 1rem;"><span style="color: ${headroomColor}; font-weight: 700;">${rl.has_headroom ? 'YES (≥10%)' : 'NO (LIMITED)'}</span></td>
-                <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">${reqRem} req / ${tokRem} tok</td>
+                <td style="padding: 0.75rem 1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; word-break: break-all; max-width: 220px;">${modelId}</td>
+                <td style="padding: 0.75rem 1rem; min-width: 150px;"><span style="color: ${stateColor}; font-weight: 700; font-size: 0.7rem;">${stateDisplay}</span></td>
+                <td style="padding: 0.75rem 1rem; color: ${cb.state === 'open' ? '#f87171' : 'var(--text-muted)'}; font-size: 0.72rem; word-break: break-word; max-width: 260px;">${causeText}</td>
+                <td style="padding: 0.75rem 1rem; color: var(--text-muted); text-align: center;">${cb.failure_count || 0}</td>
+                <td style="padding: 0.75rem 1rem; white-space: nowrap;"><span style="color: ${headroomColor}; font-weight: 700;">${rl.has_headroom ? 'YES (≥10%)' : 'NO (LIMITED)'}</span></td>
+                <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap;">${reqRem} req / ${tokRem} tok</td>
                 <td style="padding: 0.75rem 1rem; text-align: right; white-space: nowrap;">
-                    <button type="button" class="btn-alt" style="padding: 0.35rem 0.65rem; font-size: 0.7rem; border-color: rgba(34, 197, 94, 0.4); color: #4ade80; margin-right: 6px;" onclick="handleCircuitAction('${modelId}', 'reset')" title="Clear Timeout & Open Traffic (Reset to CLOSED)">🔓 Open (Reset)</button>
-                    <button type="button" class="btn-alt" style="padding: 0.35rem 0.65rem; font-size: 0.7rem; border-color: rgba(248, 113, 113, 0.4); color: #f87171;" onclick="handleCircuitAction('${modelId}', 'trip')" title="Block Model & Extend Timeout (1m -> 5m -> 10m -> 15m -> 30m)">🔒 Close (+1m/5m)</button>
+                    <button type="button" class="btn-alt" style="padding: 0.35rem 0.65rem; font-size: 0.7rem; border-color: rgba(34, 197, 94, 0.4); color: #4ade80; margin-right: 6px;" onclick="handleCircuitAction('${modelId}', 'reset')" title="Clear Timeout & Open Traffic (Reset to CLOSED)">Open (Reset)</button>
+                    <button type="button" class="btn-alt" style="padding: 0.35rem 0.65rem; font-size: 0.7rem; border-color: rgba(248, 113, 113, 0.4); color: #f87171;" onclick="handleCircuitAction('${modelId}', 'trip')" title="Block Model & Extend Timeout (1m -> 5m -> 10m -> 15m -> 30m)">Close (+1m/5m)</button>
                 </td>
             `;
             tbody.appendChild(tr);
@@ -547,18 +547,18 @@ class PayloadDataTable {
             const statusClass = req.status_code === 200 ? 'color: #4ade80;' : 'color: #f87171;';
             const inTok = req.input_tokens || 0;
             const outTok = req.output_tokens || 0;
-            const tokBadge = `<span style="font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #60a5fa;">📥 ${inTok.toLocaleString()} / 📤 ${outTok.toLocaleString()} tok</span>`;
+            const tokBadge = `<span style="font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #60a5fa;">${inTok.toLocaleString()} / ${outTok.toLocaleString()} tok</span>`;
 
             tr.innerHTML = `
-                <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">${req.timestamp}</td>
-                <td style="padding: 0.75rem 1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace;">${req.method} ${req.path}</td>
-                <td style="padding: 0.75rem 1rem; color: white;">${req.client_model || '-'}</td>
-                <td style="padding: 0.75rem 1rem; color: #fef08a; font-family: 'JetBrains Mono', monospace;">${req.mapped_model || '-'}</td>
-                <td style="padding: 0.75rem 1rem;">${tokBadge}</td>
-                <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">${req.duration_ms} ms</td>
-                <td style="padding: 0.75rem 1rem; ${statusClass} font-weight: 700;">${req.status_code}</td>
-                <td style="padding: 0.75rem 1rem; text-align: right;">
-                    <button type="button" class="btn-alt" style="padding: 0.35rem 0.75rem; font-size: 0.7rem; border-color: rgba(234, 179, 8, 0.5); color: #fef08a;" onclick="openJsonModal('${req.id}')">Inspect { JSON }</button>
+                <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap;">${req.timestamp}</td>
+                <td style="padding: 0.75rem 1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; word-break: break-all; max-width: 180px;">${req.method} ${req.path}</td>
+                <td style="padding: 0.75rem 1rem; color: white; word-break: break-all; max-width: 160px;">${req.client_model || '-'}</td>
+                <td style="padding: 0.75rem 1rem; color: #fef08a; font-family: 'JetBrains Mono', monospace; word-break: break-all; max-width: 200px;">${req.mapped_model || '-'}</td>
+                <td style="padding: 0.75rem 1rem; white-space: nowrap;">${tokBadge}</td>
+                <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap;">${req.duration_ms} ms</td>
+                <td style="padding: 0.75rem 1rem; ${statusClass} font-weight: 700; white-space: nowrap;">${req.status_code}</td>
+                <td style="padding: 0.75rem 1rem; text-align: right; white-space: nowrap;">
+                    <button type="button" class="btn-alt" style="padding: 0.35rem 0.75rem; font-size: 0.7rem; border-color: #eab308; background: rgba(234, 179, 8, 0.12); color: #ffffff;" onclick="openJsonModal('${req.id}')">Inspect { JSON }</button>
                 </td>
             `;
             tbody.appendChild(tr);
@@ -1097,26 +1097,36 @@ function renderTraceFeed() {
         
         const tdTime = document.createElement('td');
         tdTime.innerText = req.timestamp;
+        tdTime.style.whiteSpace = 'nowrap';
         tr.appendChild(tdTime);
 
         const tdPath = document.createElement('td');
         tdPath.innerText = `${req.method} ${req.path}`;
+        tdPath.style.wordBreak = 'break-all';
+        tdPath.style.maxWidth = '160px';
         tr.appendChild(tdPath);
 
         const tdClient = document.createElement('td');
         tdClient.innerText = req.client_model;
+        tdClient.style.wordBreak = 'break-all';
+        tdClient.style.maxWidth = '160px';
         tr.appendChild(tdClient);
 
         const tdUpstream = document.createElement('td');
         tdUpstream.innerText = req.mapped_model || req.target_model || '-';
+        tdUpstream.style.wordBreak = 'break-all';
+        tdUpstream.style.maxWidth = '200px';
         tr.appendChild(tdUpstream);
 
         const tdLatency = document.createElement('td');
         const dur = req.duration_ms !== undefined ? req.duration_ms : (req.latency_ms || 0);
         tdLatency.innerText = `${dur} ms`;
+        tdLatency.style.whiteSpace = 'nowrap';
         tr.appendChild(tdLatency);
 
         const tdStatus = document.createElement('td');
+        tdStatus.style.wordBreak = 'break-word';
+        tdStatus.style.maxWidth = '260px';
         const spanStatus = document.createElement('span');
         spanStatus.className = 'feed-badge ' + (req.status_code === 200 ? 'status-200' : 'status-error');
         spanStatus.innerText = req.status_code;
