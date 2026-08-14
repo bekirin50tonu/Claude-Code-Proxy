@@ -215,25 +215,24 @@ class CircuitBreakerRegistry:
         return {mid: cb.status_dict() for mid, cb in self._breakers.items()}
 
     def save_to_file(self, force: bool = False) -> None:
-        """Persist active OPEN circuit breakers to storage file."""
+        """Persist circuit breaker states to storage file."""
         if "PYTEST_CURRENT_TEST" in os.environ and not force:
             return
         try:
             os.makedirs(os.path.dirname(STORAGE_FILE), exist_ok=True)
             data: dict[str, Any] = {}
             for mid, cb in self._breakers.items():
-                if cb.state == CircuitState.OPEN:
-                    data[mid] = {
-                        "state": cb.state.value,
-                        "failure_count": cb._failure_count,
-                        "started_at": cb.started_at,
-                        "expired_at": cb.expired_at,
-                        "recovery_timeout": cb.recovery_timeout,
-                        "manual_timeout_index": cb._manual_timeout_index,
-                        "last_failure_reason": cb._last_failure_reason,
-                        "opened_at_wall": cb._opened_at_wall,
-                        "reopens_at_wall": cb._reopens_at_wall,
-                    }
+                data[mid] = {
+                    "state": cb.state.value,
+                    "failure_count": cb._failure_count,
+                    "started_at": cb.started_at,
+                    "expired_at": cb.expired_at,
+                    "recovery_timeout": cb.recovery_timeout,
+                    "manual_timeout_index": cb._manual_timeout_index,
+                    "last_failure_reason": cb._last_failure_reason,
+                    "opened_at_wall": cb._opened_at_wall,
+                    "reopens_at_wall": cb._reopens_at_wall,
+                }
             with open(STORAGE_FILE, "w", encoding="utf-8") as f:
                 yaml.safe_dump(data, f, default_flow_style=False)
         except Exception as e:
