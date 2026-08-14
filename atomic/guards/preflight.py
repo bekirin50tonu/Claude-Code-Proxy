@@ -101,13 +101,13 @@ async def preflight_model_probe(model_id: str) -> bool:
         async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
             response = await client.post(url, headers=headers, json=payload)
 
-        if response.status_code in (200, 201, 202):
+        if response.status_code < 500:
             await cb.record_success()
-            logger.debug("Preflight OK: '%s' → %d", model_id, response.status_code)
+            logger.debug("Preflight OK (Server Reachable): '%s' → %d", model_id, response.status_code)
             return True
 
-        logger.warning("Preflight FAIL: '%s' → %d", model_id, response.status_code)
-        await cb.record_failure()
+        logger.warning("Preflight FAIL (Server 5xx Error): '%s' → %d", model_id, response.status_code)
+        await cb.record_failure(reason=f"Upstream HTTP {response.status_code} preflight failure")
         return False
 
     except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:

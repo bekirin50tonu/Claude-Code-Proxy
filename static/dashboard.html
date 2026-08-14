@@ -15,6 +15,17 @@
             <p>Monochrome Client Gateway Terminus</p>
         </div>
         <div class="header-links">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 0.65rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">LIVE REFRESH:</span>
+                <select id="header-refresh-select" onchange="onHeaderRefreshRateChange(this.value)" style="background: #050608; border: 1px solid var(--border-subtle); color: #ffffff; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; outline: none; cursor: pointer; transition: border 0.2s;">
+                    <option value="1">1s (Ultra Fast)</option>
+                    <option value="2">2s (Fast)</option>
+                    <option value="4" selected>4s (Default)</option>
+                    <option value="10">10s (Relaxed)</option>
+                    <option value="30">30s (Slow)</option>
+                    <option value="0">Off (Manual)</option>
+                </select>
+            </div>
             <a href="/docs" target="_blank" class="header-link">Docs</a>
         </div>
     </header>
@@ -59,7 +70,7 @@
         <div class="control-sidebar">
             <button type="button" class="control-btn active" data-pane="pane-models" onclick="switchPane('pane-models', this)">Model Matrix</button>
             <button type="button" class="control-btn" data-pane="pane-router" onclick="switchPane('pane-router', this)">Router &amp; Fallbacks</button>
-            <button type="button" class="control-btn" data-pane="pane-dev" onclick="switchPane('pane-dev', this)" style="border-color: rgba(234, 179, 8, 0.4); color: #fef08a;">Dev Mode</button>
+            <button type="button" class="control-btn" data-pane="pane-dev" onclick="switchPane('pane-dev', this)" style="border-color: #eab308; background: rgba(234, 179, 8, 0.15); color: #ffffff; font-weight: 700;">Dev Mode</button>
             <button type="button" class="control-btn" data-pane="pane-keys" onclick="switchPane('pane-keys', this)">API Credentials</button>
             <button type="button" class="control-btn" data-pane="pane-endpoints" onclick="switchPane('pane-endpoints', this)">Local Endpoints</button>
             <button type="button" class="control-btn" data-pane="pane-tunnels" onclick="switchPane('pane-tunnels', this)">Proxy Tunnels &amp; Base URLs</button>
@@ -313,22 +324,22 @@
                 <div id="pane-dev" class="panel-pane">
                     <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                         <div>
-                            <h2>🛠️ Dev Mode</h2>
+                            <h2>Dev Mode</h2>
                             <p>Unified developer console for inspecting API calls, error stack traces, fallback history, and raw request/response JSON payloads.</p>
                         </div>
                     </div>
 
                     <!-- Sub-tab Navigation Bar -->
                     <div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.75rem; align-items: center; flex-wrap: wrap;">
-                        <button type="button" class="btn-alt active" id="dev-subtab-btn-inspector" onclick="switchDevSubTab('inspector')" style="padding: 0.5rem 1.1rem; font-size: 0.75rem; border-color: rgba(234, 179, 8, 0.4); color: #fef08a;">🔍 JSON Payload Inspector</button>
-                        <button type="button" class="btn-alt" id="dev-subtab-btn-trace" onclick="switchDevSubTab('trace')" style="padding: 0.5rem 1.1rem; font-size: 0.75rem;">📜 Live System Trace Feed</button>
-                        <a href="/api/dev/raw-logs" target="_blank" class="btn-alt" style="padding: 0.5rem 1.1rem; font-size: 0.75rem; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto;">📁 Download Raw Log File (.jsonl)</a>
+                        <button type="button" class="btn-alt active" id="dev-subtab-btn-inspector" onclick="switchDevSubTab('inspector')" style="padding: 0.5rem 1.1rem; font-size: 0.75rem; border-color: #eab308; background: rgba(234, 179, 8, 0.15); color: #ffffff; font-weight: 700;">JSON Payload Inspector</button>
+                        <button type="button" class="btn-alt" id="dev-subtab-btn-trace" onclick="switchDevSubTab('trace')" style="padding: 0.5rem 1.1rem; font-size: 0.75rem;">Live System Trace Feed</button>
+                        <a href="/api/dev/raw-logs" target="_blank" class="btn-alt" style="padding: 0.5rem 1.1rem; font-size: 0.75rem; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto;">Download Raw Log File (.jsonl)</a>
                     </div>
 
                     <!-- Sub-tab 1: JSON Payload Inspector -->
                     <div id="dev-subtab-inspector">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                            <input type="text" id="dev-search-input" placeholder="🔍 Filter payloads by model, status, path..." style="padding: 0.5rem 0.85rem; font-size: 0.75rem; background: #050608; border: 1px solid var(--border-subtle); border-radius: 6px; color: white; width: 320px;" oninput="onDevSearchInput(this.value)">
+                            <input type="text" id="dev-search-input" placeholder="Filter payloads by model, status, path..." style="padding: 0.5rem 0.85rem; font-size: 0.75rem; background: #050608; border: 1px solid var(--border-subtle); border-radius: 6px; color: white; width: 320px;" oninput="onDevSearchInput(this.value)">
                             <button type="button" class="btn-alt" onclick="fetchDevPayloads()" style="padding: 0.4rem 1rem; font-size: 0.75rem;">Refresh Feed</button>
                         </div>
                         <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
@@ -349,6 +360,27 @@
                                     <tr><td colspan="8" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No Claude Code requests captured yet. Send a request to see JSON payloads here.</td></tr>
                                 </tbody>
                             </table>
+                        </div>
+                        <!-- Inspector Pagination Bar -->
+                        <div id="inspector-pagination-bar" style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding: 0.5rem 0.25rem; font-size: 0.75rem; color: var(--text-muted);">
+                            <div style="display: flex; gap: 0.85rem; align-items: center;">
+                                <div id="inspector-page-info">Showing 0-0 of 0 requests</div>
+                                <div style="display: flex; gap: 4px; align-items: center;">
+                                    <label for="inspector-page-size" style="font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">Show:</label>
+                                    <select id="inspector-page-size" onchange="changeInspectorPageSize(this.value)" style="background: #050608; border: 1px solid var(--border-subtle); color: #ffffff; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; outline: none; cursor: pointer;">
+                                        <option value="5">5</option>
+                                        <option value="10">10</option>
+                                        <option value="20" selected>20</option>
+                                        <option value="40">40</option>
+                                        <option value="all">All</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <button type="button" class="btn-alt" id="inspector-btn-prev" onclick="changeInspectorPage(-1)" style="padding: 0.35rem 0.85rem; font-size: 0.7rem;">‹ Prev</button>
+                                <span id="inspector-page-number" style="font-weight: 700; color: white; font-family: 'JetBrains Mono', monospace; padding: 0 6px;">Page 1 of 1</span>
+                                <button type="button" class="btn-alt" id="inspector-btn-next" onclick="changeInspectorPage(1)" style="padding: 0.35rem 0.85rem; font-size: 0.7rem;">Next ›</button>
+                            </div>
                         </div>
                     </div>
 
@@ -372,6 +404,27 @@
                                     </tr>
                                 </tbody>
                             </table>
+                        </div>
+                        <!-- Trace Feed Pagination Bar -->
+                        <div id="trace-pagination-bar" style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; padding: 0.5rem 0.25rem; font-size: 0.75rem; color: var(--text-muted);">
+                            <div style="display: flex; gap: 0.85rem; align-items: center;">
+                                <div id="trace-page-info">Showing 0-0 of 0 events</div>
+                                <div style="display: flex; gap: 4px; align-items: center;">
+                                    <label for="trace-page-size" style="font-size: 0.65rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">Show:</label>
+                                    <select id="trace-page-size" onchange="changeTracePageSize(this.value)" style="background: #050608; border: 1px solid var(--border-subtle); color: #ffffff; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; outline: none; cursor: pointer;">
+                                        <option value="5">5</option>
+                                        <option value="10">10</option>
+                                        <option value="20" selected>20</option>
+                                        <option value="40">40</option>
+                                        <option value="all">All</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <button type="button" class="btn-alt" id="trace-btn-prev" onclick="changeTracePage(-1)" style="padding: 0.35rem 0.85rem; font-size: 0.7rem;">‹ Prev</button>
+                                <span id="trace-page-number" style="font-weight: 700; color: white; font-family: 'JetBrains Mono', monospace; padding: 0 6px;">Page 1 of 1</span>
+                                <button type="button" class="btn-alt" id="trace-btn-next" onclick="changeTracePage(1)" style="padding: 0.35rem 0.85rem; font-size: 0.7rem;">Next ›</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -566,57 +619,568 @@
                 <div id="pane-limits" class="panel-pane">
                     <div class="panel-header">
                         <h2>Throttle &amp; Timeout Settings</h2>
-                        <p>Configure rate limits, concurrency caps, and HTTP socket timeouts. Select a provider preset to populate recommended values, then commit to save.</p>
+                        <p>Configure RPM, TPM, RPD (Daily Limit), Rate Window, Max Concurrency, Context Window, Max Output, and HTTP Socket Timeouts for each upstream LLM provider individually.</p>
                     </div>
 
-                    <!-- Provider Preset Selector -->
-                    <div style="margin-bottom: 1.75rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 1rem 1.25rem;">
-                        <div style="font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 0.75rem;">Provider Defaults</div>
-                        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-                            <select id="provider-preset-select" style="flex: 1; min-width: 200px; max-width: 320px;">
-                                <option value="">-- Select provider --</option>
-                                <option value="nvidia_nim">NVIDIA NIM</option>
-                                <option value="openrouter">OpenRouter</option>
-                                <option value="gemini">Google Gemini</option>
-                                <option value="groq">Groq</option>
-                                <option value="deepseek">DeepSeek</option>
-                                <option value="mistral">Mistral / Codestral</option>
-                                <option value="cerebras">Cerebras</option>
-                                <option value="fireworks">Fireworks AI</option>
-                                <option value="kimi">Kimi (Moonshot AI)</option>
-                                <option value="lmstudio">LM Studio (Local)</option>
-                                <option value="ollama">Ollama (Local)</option>
-                                <option value="llama_cpp">llama.cpp (Local)</option>
-                            </select>
-                            <button type="button" class="btn-alt" onclick="applySelectedPreset()" style="padding: 0.75rem 1.5rem; font-size: 0.75rem; white-space: nowrap;">Apply Defaults</button>
+                    <!-- Provider-Specific Throttle, Timeout & Token Budget Matrix Card Container -->
+                    <div style="background: rgba(255, 255, 255, 0.015); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.5rem; margin-top: 0.5rem;">
+                        <div style="margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 1rem;">
+                            <h3 style="font-size: 0.95rem; font-weight: 700; color: #ffffff; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Per-Provider Budget &amp; Timeout Matrix</h3>
+                            <p style="font-size: 0.75rem; color: var(--text-muted);">Configure RPM, TPM, RPD (Daily Limit), Rate Window, Max Concurrency, Context Window, Max Output, and HTTP Socket Timeouts for each upstream LLM provider individually.</p>
                         </div>
-                        <div id="preset-desc" style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.65rem; min-height: 1rem; line-height: 1.5;"></div>
-                    </div>
-
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label for="PROVIDER_RATE_LIMIT">Rate Limit (requests per window)</label>
-                            <input type="number" id="PROVIDER_RATE_LIMIT">
+                        <div style="display: flex; gap: 0.4rem; margin-bottom: 1.25rem; flex-wrap: wrap; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.75rem;">
+                            <button type="button" class="btn-alt provider-tab-btn active" id="ptab-btn-nvidia_nim" onclick="switchProviderTab('nvidia_nim')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem; border-color: #eab308; background: rgba(234, 179, 8, 0.15); color: #ffffff; font-weight: 700;">NVIDIA NIM</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-open_router" onclick="switchProviderTab('open_router')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">OpenRouter</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-gemini" onclick="switchProviderTab('gemini')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">Google Gemini</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-groq" onclick="switchProviderTab('groq')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">Groq</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-deepseek" onclick="switchProviderTab('deepseek')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">DeepSeek</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-mistral" onclick="switchProviderTab('mistral')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">Mistral / Codestral</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-cerebras" onclick="switchProviderTab('cerebras')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">Cerebras</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-fireworks" onclick="switchProviderTab('fireworks')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">Fireworks AI</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-kimi" onclick="switchProviderTab('kimi')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">Kimi (Moonshot AI)</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-lmstudio" onclick="switchProviderTab('lmstudio')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">LM Studio (Local)</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-ollama" onclick="switchProviderTab('ollama')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">Ollama (Local)</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-llama_cpp" onclick="switchProviderTab('llama_cpp')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">llama.cpp (Local)</button>
                         </div>
-                        <div class="form-group">
-                            <label for="PROVIDER_RATE_WINDOW">Rate Window (seconds)</label>
-                            <input type="number" id="PROVIDER_RATE_WINDOW">
+                        <div id="ptab-card-nvidia_nim" class="provider-tab-card" style="display: block;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">NVIDIA NIM Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_NVIDIA_NIM_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_NVIDIA_NIM_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_NVIDIA_NIM_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_NVIDIA_NIM_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_NVIDIA_NIM_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_NVIDIA_NIM_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_NVIDIA_NIM_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_NVIDIA_NIM_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_NVIDIA_NIM_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_NVIDIA_NIM_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_NVIDIA_NIM_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_NVIDIA_NIM_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_NVIDIA_NIM_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_NVIDIA_NIM_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_NVIDIA_NIM_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_NVIDIA_NIM_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_NVIDIA_NIM_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_NVIDIA_NIM_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_NVIDIA_NIM_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_NVIDIA_NIM_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="PROVIDER_MAX_CONCURRENCY">Max Concurrent Connections</label>
-                            <input type="number" id="PROVIDER_MAX_CONCURRENCY">
+                        <div id="ptab-card-open_router" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">OpenRouter Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_OPEN_ROUTER_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_OPEN_ROUTER_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OPEN_ROUTER_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_OPEN_ROUTER_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OPEN_ROUTER_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_OPEN_ROUTER_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OPEN_ROUTER_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_OPEN_ROUTER_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OPEN_ROUTER_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_OPEN_ROUTER_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OPEN_ROUTER_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_OPEN_ROUTER_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OPEN_ROUTER_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_OPEN_ROUTER_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OPEN_ROUTER_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_OPEN_ROUTER_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OPEN_ROUTER_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_OPEN_ROUTER_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OPEN_ROUTER_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_OPEN_ROUTER_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
-                            <input type="number" id="HTTP_READ_TIMEOUT">
+                        <div id="ptab-card-gemini" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">Google Gemini Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_GEMINI_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_GEMINI_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GEMINI_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_GEMINI_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GEMINI_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_GEMINI_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GEMINI_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_GEMINI_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GEMINI_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_GEMINI_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GEMINI_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_GEMINI_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GEMINI_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_GEMINI_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GEMINI_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_GEMINI_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GEMINI_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_GEMINI_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GEMINI_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_GEMINI_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
-                            <input type="number" id="HTTP_WRITE_TIMEOUT">
+                        <div id="ptab-card-groq" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">Groq Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_GROQ_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_GROQ_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GROQ_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_GROQ_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GROQ_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_GROQ_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GROQ_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_GROQ_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GROQ_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_GROQ_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GROQ_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_GROQ_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GROQ_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_GROQ_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GROQ_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_GROQ_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GROQ_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_GROQ_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_GROQ_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_GROQ_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
-                            <input type="number" id="HTTP_CONNECT_TIMEOUT">
+                        <div id="ptab-card-deepseek" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">DeepSeek Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_DEEPSEEK_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_DEEPSEEK_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_DEEPSEEK_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_DEEPSEEK_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_DEEPSEEK_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_DEEPSEEK_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_DEEPSEEK_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_DEEPSEEK_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_DEEPSEEK_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_DEEPSEEK_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_DEEPSEEK_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_DEEPSEEK_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_DEEPSEEK_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_DEEPSEEK_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_DEEPSEEK_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_DEEPSEEK_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_DEEPSEEK_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_DEEPSEEK_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_DEEPSEEK_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_DEEPSEEK_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="ptab-card-mistral" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">Mistral / Codestral Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_MISTRAL_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_MISTRAL_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_MISTRAL_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_MISTRAL_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_MISTRAL_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_MISTRAL_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_MISTRAL_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_MISTRAL_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_MISTRAL_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_MISTRAL_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_MISTRAL_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_MISTRAL_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_MISTRAL_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_MISTRAL_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_MISTRAL_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_MISTRAL_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_MISTRAL_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_MISTRAL_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_MISTRAL_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_MISTRAL_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="ptab-card-cerebras" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">Cerebras Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_CEREBRAS_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_CEREBRAS_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_CEREBRAS_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_CEREBRAS_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_CEREBRAS_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_CEREBRAS_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_CEREBRAS_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_CEREBRAS_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_CEREBRAS_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_CEREBRAS_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_CEREBRAS_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_CEREBRAS_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_CEREBRAS_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_CEREBRAS_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_CEREBRAS_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_CEREBRAS_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_CEREBRAS_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_CEREBRAS_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_CEREBRAS_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_CEREBRAS_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="ptab-card-fireworks" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">Fireworks AI Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_FIREWORKS_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_FIREWORKS_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_FIREWORKS_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_FIREWORKS_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_FIREWORKS_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_FIREWORKS_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_FIREWORKS_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_FIREWORKS_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_FIREWORKS_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_FIREWORKS_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_FIREWORKS_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_FIREWORKS_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_FIREWORKS_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_FIREWORKS_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_FIREWORKS_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_FIREWORKS_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_FIREWORKS_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_FIREWORKS_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_FIREWORKS_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_FIREWORKS_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="ptab-card-kimi" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">Kimi (Moonshot AI) Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_KIMI_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_KIMI_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_KIMI_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_KIMI_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_KIMI_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_KIMI_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_KIMI_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_KIMI_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_KIMI_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_KIMI_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_KIMI_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_KIMI_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_KIMI_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_KIMI_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_KIMI_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_KIMI_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_KIMI_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_KIMI_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_KIMI_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_KIMI_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="ptab-card-lmstudio" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">LM Studio (Local) Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_LMSTUDIO_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_LMSTUDIO_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LMSTUDIO_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_LMSTUDIO_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LMSTUDIO_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_LMSTUDIO_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LMSTUDIO_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_LMSTUDIO_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LMSTUDIO_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_LMSTUDIO_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LMSTUDIO_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_LMSTUDIO_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LMSTUDIO_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_LMSTUDIO_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LMSTUDIO_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_LMSTUDIO_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LMSTUDIO_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_LMSTUDIO_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LMSTUDIO_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_LMSTUDIO_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="ptab-card-ollama" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">Ollama (Local) Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_OLLAMA_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_OLLAMA_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OLLAMA_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_OLLAMA_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OLLAMA_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_OLLAMA_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OLLAMA_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_OLLAMA_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OLLAMA_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_OLLAMA_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OLLAMA_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_OLLAMA_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OLLAMA_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_OLLAMA_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OLLAMA_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_OLLAMA_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OLLAMA_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_OLLAMA_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_OLLAMA_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_OLLAMA_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="ptab-card-llama_cpp" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">llama.cpp (Local) Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_LLAMA_CPP_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_LLAMA_CPP_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LLAMA_CPP_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_LLAMA_CPP_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LLAMA_CPP_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_LLAMA_CPP_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LLAMA_CPP_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_LLAMA_CPP_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LLAMA_CPP_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_LLAMA_CPP_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LLAMA_CPP_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_LLAMA_CPP_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LLAMA_CPP_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_LLAMA_CPP_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LLAMA_CPP_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_LLAMA_CPP_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LLAMA_CPP_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_LLAMA_CPP_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_LLAMA_CPP_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_LLAMA_CPP_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -673,45 +1237,91 @@
                 </div>
 
                 <!-- PANE 9: SETUP GUIDE -->
+                <!-- PANE: SETUP GUIDE -->
                 <div id="pane-guide" class="panel-pane">
                     <div class="panel-header">
-                        <h2>Setup Guide & Environment Settings</h2>
-                        <p>Learn how to redirect the Claude Code CLI tool through this local proxy gateway.</p>
+                        <h2>Setup Guide &amp; Environment Settings</h2>
+                        <p>Learn how to redirect the Claude Code CLI tool through this local proxy gateway on Linux, macOS, or Windows.</p>
                     </div>
-                    <div style="display: flex; flex-direction: column; gap: 1.5rem; font-size: 0.85rem; line-height: 1.6;">
-                        <div>
-                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">1. Concept</h3>
-                            <p style="color: var(--text-muted);">
-                                By default, Claude Code connects directly to Anthropic's cloud endpoints. We redirect its traffic locally using the <code>ANTHROPIC_BASE_URL</code> environment variable. 
-                                Since Claude Code requires an authentication token to initialize, we provide a dummy token <code>freecc</code> (or your custom Gateway Token) via <code>ANTHROPIC_AUTH_TOKEN</code>.
-                            </p>
-                        </div>
+                    
+                    <!-- OS Selection Tabs -->
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.75rem;">
+                        <button type="button" class="btn-alt os-tab-btn active" id="os-btn-linux" onclick="switchOsTab('linux')" style="padding: 0.5rem 1.1rem; font-size: 0.75rem; border-color: #eab308; background: rgba(234, 179, 8, 0.15); color: #ffffff; font-weight: 700;">Linux</button>
+                        <button type="button" class="btn-alt os-tab-btn" id="os-btn-mac" onclick="switchOsTab('mac')" style="padding: 0.5rem 1.1rem; font-size: 0.75rem;">macOS</button>
+                        <button type="button" class="btn-alt os-tab-btn" id="os-btn-windows" onclick="switchOsTab('windows')" style="padding: 0.5rem 1.1rem; font-size: 0.75rem;">Windows</button>
+                    </div>
 
-                        <div>
-                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">2. Bash / Zsh Shell Integration</h3>
-                            <p style="color: var(--text-muted); margin-bottom: 0.5rem;">Run this inside your terminal session to connect directly, or add it to your <code>~/.bashrc</code> or <code>~/.zshrc</code> file:</p>
-                            <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;">export ANTHROPIC_BASE_URL="http://127.0.0.1:8090"
+                    <!-- OS Content Cards -->
+                    <!-- 1. Linux -->
+                    <div id="os-card-linux" class="os-guide-card" style="display: block;">
+                        <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">Linux Setup Guide</h3>
+                        <p style="color: var(--text-muted); margin-bottom: 0.75rem;">Run this inside your terminal session (Bash/Zsh) or add it to <code>~/.bashrc</code> / <code>~/.zshrc</code>:</p>
+                        <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;"># Temporary terminal session
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8090"
 export ANTHROPIC_AUTH_TOKEN="<span class="guide-token-display">freecc</span>"
+claude
+
+# Permanent setup (Bash/Zsh)
+echo 'export ANTHROPIC_BASE_URL="http://127.0.0.1:8090"' >> ~/.bashrc
+echo 'export ANTHROPIC_AUTH_TOKEN="freecc"' >> ~/.bashrc
+source ~/.bashrc</code></pre>
+                        <h4 style="color: white; font-size: 0.85rem; margin-top: 1rem; margin-bottom: 0.4rem;">Fish Shell Users:</h4>
+                        <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;">set -ux ANTHROPIC_BASE_URL "http://127.0.0.1:8090"
+set -ux ANTHROPIC_AUTH_TOKEN "<span class="guide-token-display">freecc</span>"
 claude</code></pre>
-                        </div>
+                    </div>
 
-                        <div>
-                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">3. Fish Shell Integration</h3>
-                            <p style="color: var(--text-muted); margin-bottom: 0.5rem;">For Fish shell users, you can define a custom function (e.g., <code>fcc-claude</code>) in your fish configuration (<code>~/.config/fish/functions/fcc-claude.fish</code>):</p>
-                            <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;">function fcc-claude
-    env ANTHROPIC_BASE_URL="http://127.0.0.1:8090" ANTHROPIC_AUTH_TOKEN="<span class="guide-token-display">freecc</span>" claude $argv
-end</code></pre>
-                            <p style="color: var(--text-muted); margin-top: 0.5rem;">Then, simply type <code>fcc-claude</code> in your terminal to launch it with the proxy routing enabled, or use <code>claude</code> to bypass the proxy.</p>
-                        </div>
+                    <!-- 2. macOS -->
+                    <div id="os-card-mac" class="os-guide-card" style="display: none;">
+                        <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">macOS Setup Guide</h3>
+                        <p style="color: var(--text-muted); margin-bottom: 0.75rem;">macOS uses Zsh by default. Execute the following in Terminal or add to <code>~/.zshrc</code>:</p>
+                        <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;"># Terminal export
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8090"
+export ANTHROPIC_AUTH_TOKEN="<span class="guide-token-display">freecc</span>"
+claude
 
-                        <div style="border-top: 1px solid var(--border-subtle); padding-top: 1rem;">
-                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">Security Note — Gateway Auth Token</h3>
-                            <p style="color: var(--text-muted);">
-                                Currently, your Gateway Token state is: <strong id="guide-token-state" style="color: white;">DISABLED</strong>.
-                                <br>
-                                You can configure a custom token inside the <strong>API Credentials</strong> pane. If configured, you must set your <code>ANTHROPIC_AUTH_TOKEN</code> override to match that exact token. If left blank, any dummy string is accepted.
-                            </p>
-                        </div>
+# Permanent setup (Zsh)
+echo 'export ANTHROPIC_BASE_URL="http://127.0.0.1:8090"' >> ~/.zshrc
+echo 'export ANTHROPIC_AUTH_TOKEN="freecc"' >> ~/.zshrc
+source ~/.zshrc</code></pre>
+                        <h4 style="color: white; font-size: 0.85rem; margin-top: 1rem; margin-bottom: 0.4rem;">Fish Shell Users (macOS Homebrew):</h4>
+                        <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;">set -ux ANTHROPIC_BASE_URL "http://127.0.0.1:8090"
+set -ux ANTHROPIC_AUTH_TOKEN "<span class="guide-token-display">freecc</span>"
+claude</code></pre>
+                    </div>
+
+                    <!-- 3. Windows -->
+                    <div id="os-card-windows" class="os-guide-card" style="display: none;">
+                        <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">Windows Setup Guide</h3>
+                        
+                        <h4 style="color: white; font-size: 0.85rem; margin-top: 0.5rem; margin-bottom: 0.4rem;">PowerShell:</h4>
+                        <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;"># Current PowerShell Session
+$env:ANTHROPIC_BASE_URL="http://127.0.0.1:8090"
+$env:ANTHROPIC_AUTH_TOKEN="<span class="guide-token-display">freecc</span>"
+claude
+
+# Permanent Environment Variables (PowerShell)
+[System.Environment]::SetEnvironmentVariable('ANTHROPIC_BASE_URL', 'http://127.0.0.1:8090', 'User')
+[System.Environment]::SetEnvironmentVariable('ANTHROPIC_AUTH_TOKEN', 'freecc', 'User')</code></pre>
+
+                        <h4 style="color: white; font-size: 0.85rem; margin-top: 1rem; margin-bottom: 0.4rem;">Command Prompt (CMD):</h4>
+                        <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;">:: Current CMD Session
+set ANTHROPIC_BASE_URL=http://127.0.0.1:8090
+set ANTHROPIC_AUTH_TOKEN=<span class="guide-token-display">freecc</span>
+claude
+
+:: Permanent Environment Variables (CMD)
+setx ANTHROPIC_BASE_URL "http://127.0.0.1:8090"
+setx ANTHROPIC_AUTH_TOKEN "freecc"</code></pre>
+                    </div>
+
+                    <div style="border-top: 1px solid var(--border-subtle); padding-top: 1.25rem; margin-top: 1.5rem;">
+                        <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">Security Note — Gateway Auth Token</h3>
+                        <p style="color: var(--text-muted); font-size: 0.85rem;">
+                            Currently, your Gateway Token state is: <strong id="guide-token-state" style="color: white;">DISABLED</strong>.
+                            <br>
+                            You can configure a custom token inside the <strong>API Credentials</strong> pane. If configured, you must set your <code>ANTHROPIC_AUTH_TOKEN</code> override to match that exact token. If left blank, any dummy string is accepted.
+                        </p>
                     </div>
                 </div>
 

@@ -195,9 +195,158 @@ def get_int(key: str, default: int) -> int:
         return default
 
 
+PROVIDER_DEFAULTS: dict[str, dict[str, int]] = {
+    "nvidia_nim": {
+        "rpm": 38,
+        "tpm": 200000,
+        "rpd": 1000,
+        "rate_window": 60,
+        "max_concurrency": 5,
+        "context": 1000000,
+        "max_output": 32768,
+        "http_read_timeout": 120,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "open_router": {
+        "rpm": 60,
+        "tpm": 300000,
+        "rpd": 10000,
+        "rate_window": 60,
+        "max_concurrency": 10,
+        "context": 200000,
+        "max_output": 16384,
+        "http_read_timeout": 120,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "gemini": {
+        "rpm": 30,
+        "tpm": 1000000,
+        "rpd": 1500,
+        "rate_window": 60,
+        "max_concurrency": 5,
+        "context": 1000000,
+        "max_output": 8192,
+        "http_read_timeout": 120,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "groq": {
+        "rpm": 30,
+        "tpm": 100000,
+        "rpd": 1440,
+        "rate_window": 60,
+        "max_concurrency": 5,
+        "context": 128000,
+        "max_output": 8192,
+        "http_read_timeout": 60,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "deepseek": {
+        "rpm": 60,
+        "tpm": 200000,
+        "rpd": 5000,
+        "rate_window": 60,
+        "max_concurrency": 5,
+        "context": 64000,
+        "max_output": 8192,
+        "http_read_timeout": 120,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "mistral": {
+        "rpm": 30,
+        "tpm": 200000,
+        "rpd": 2000,
+        "rate_window": 60,
+        "max_concurrency": 5,
+        "context": 128000,
+        "max_output": 16384,
+        "http_read_timeout": 120,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "cerebras": {
+        "rpm": 30,
+        "tpm": 100000,
+        "rpd": 1440,
+        "rate_window": 60,
+        "max_concurrency": 5,
+        "context": 128000,
+        "max_output": 8192,
+        "http_read_timeout": 60,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "fireworks": {
+        "rpm": 60,
+        "tpm": 200000,
+        "rpd": 5000,
+        "rate_window": 60,
+        "max_concurrency": 5,
+        "context": 128000,
+        "max_output": 16384,
+        "http_read_timeout": 120,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "kimi": {
+        "rpm": 30,
+        "tpm": 200000,
+        "rpd": 1000,
+        "rate_window": 60,
+        "max_concurrency": 5,
+        "context": 128000,
+        "max_output": 8192,
+        "http_read_timeout": 120,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "lmstudio": {
+        "rpm": 120,
+        "tpm": 1000000,
+        "rpd": 100000,
+        "rate_window": 60,
+        "max_concurrency": 10,
+        "context": 128000,
+        "max_output": 16384,
+        "http_read_timeout": 300,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "ollama": {
+        "rpm": 120,
+        "tpm": 1000000,
+        "rpd": 100000,
+        "rate_window": 60,
+        "max_concurrency": 10,
+        "context": 128000,
+        "max_output": 16384,
+        "http_read_timeout": 300,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "llama_cpp": {
+        "rpm": 120,
+        "tpm": 1000000,
+        "rpd": 100000,
+        "rate_window": 60,
+        "max_concurrency": 10,
+        "context": 128000,
+        "max_output": 16384,
+        "http_read_timeout": 300,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+}
+
+
 class Settings:
     # Upstream API keys and endpoints
     NVIDIA_NIM_API_KEY: str = os.getenv("NVIDIA_NIM_API_KEY", "")
+
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
     GATEWAY_AUTH_TOKEN: str = os.getenv("GATEWAY_AUTH_TOKEN", "")
     MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")
@@ -252,6 +401,7 @@ class Settings:
 
 
     # Provider rate limits and performance controls
+    REFRESH_TIME: int = get_int("REFRESH_TIME", 4)
     PROVIDER_RATE_LIMIT: int = get_int("PROVIDER_RATE_LIMIT", 40)
     PROVIDER_RATE_WINDOW: int = get_int("PROVIDER_RATE_WINDOW", 60)
     PROVIDER_MAX_CONCURRENCY: int = get_int("PROVIDER_MAX_CONCURRENCY", 5)
@@ -311,6 +461,22 @@ class Settings:
         if "haiku" in lower:
             return self.THINKING_MODE_HAIKU
         return self.THINKING_MODE_DEFAULT
+
+    def get_provider_config(self, provider_name: str) -> dict[str, int]:
+        p = provider_name.lower().strip()
+        defaults = PROVIDER_DEFAULTS.get(p, PROVIDER_DEFAULTS["nvidia_nim"])
+        res = {}
+        for field_name, def_val in defaults.items():
+            env_key = f"PROVIDER_{p.upper()}_{field_name.upper()}"
+            val_attr = getattr(self, env_key, None)
+            if val_attr is not None:
+                try:
+                    res[field_name] = int(val_attr)
+                except (ValueError, TypeError):
+                    res[field_name] = def_val
+            else:
+                res[field_name] = get_int(env_key, def_val)
+        return res
 
     def reload(self) -> None:
         """Reload configurations from the .env file and update settings in-memory."""
@@ -374,7 +540,7 @@ class Settings:
         )
         self.MODEL = os.getenv("MODEL", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
 
-
+        self.REFRESH_TIME = get_int("REFRESH_TIME", 4)
         self.PROVIDER_RATE_LIMIT = get_int("PROVIDER_RATE_LIMIT", 40)
         self.PROVIDER_RATE_WINDOW = get_int("PROVIDER_RATE_WINDOW", 60)
         self.PROVIDER_MAX_CONCURRENCY = get_int("PROVIDER_MAX_CONCURRENCY", 5)
@@ -417,6 +583,17 @@ class Settings:
         self.THINKING_MODE_SONNET = os.getenv("THINKING_MODE_SONNET", "inherit")
         self.THINKING_MODE_HAIKU = os.getenv("THINKING_MODE_HAIKU", "inherit")
         self.THINKING_MODE_DEFAULT = os.getenv("THINKING_MODE_DEFAULT", "inherit")
+
+        for p, d in PROVIDER_DEFAULTS.items():
+            for field_name, def_val in d.items():
+                attr_name = f"PROVIDER_{p.upper()}_{field_name.upper()}"
+                setattr(self, attr_name, get_int(attr_name, def_val))
+
+
+for _p, _d in PROVIDER_DEFAULTS.items():
+    for _field_name, _def_val in _d.items():
+        _attr_name = f"PROVIDER_{_p.upper()}_{_field_name.upper()}"
+        setattr(Settings, _attr_name, get_int(_attr_name, _def_val))
 
 
 
@@ -541,6 +718,50 @@ class ProxyStats:
 
     def get_recent_dicts(self, include_payload: bool = True) -> list[dict[str, Any]]:
         return [entry.to_dict(include_payload=include_payload) for entry in self.recent_requests]
+
+    def get_paginated_payloads(
+        self,
+        limit: int = 20,
+        page: int = 1,
+        query: str = "",
+    ) -> dict[str, Any]:
+        """Return server-side filtered and paginated payloads to conserve RAM and bandwidth."""
+        import math
+        filtered_entries = []
+        q = (query or "").strip().lower()
+
+        for req in self.recent_requests:
+            if not q:
+                filtered_entries.append(req)
+            else:
+                c_model = (req.client_model or "").lower()
+                m_model = (req.mapped_model or "").lower()
+                path = (req.path or "").lower()
+                method = (req.method or "").lower()
+                status = str(req.status_code)
+                req_b = json.dumps(req.request_body).lower() if isinstance(req.request_body, (dict, list)) else str(req.request_body or "").lower()
+                resp_b = json.dumps(req.response_body).lower() if isinstance(req.response_body, (dict, list)) else str(req.response_body or "").lower()
+
+                if (q in c_model or q in m_model or q in path or q in method or q in status or q in req_b or q in resp_b):
+                    filtered_entries.append(req)
+
+        total = len(filtered_entries)
+        limit = max(1, limit)
+        total_pages = max(1, math.ceil(total / limit))
+        page = min(total_pages, max(1, page))
+
+        start_idx = (page - 1) * limit
+        end_idx = min(total, start_idx + limit)
+        paged_items = filtered_entries[start_idx:end_idx]
+
+        return {
+            "total": total,
+            "total_captured": self._request_counter,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
+            "payloads": [item.to_dict(include_payload=True) for item in paged_items],
+        }
 
 
 

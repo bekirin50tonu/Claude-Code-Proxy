@@ -81,8 +81,101 @@ async function loadConfigs() {
                 tokenState.style.color = "var(--text-dim)";
             }
         }
+
+        startLiveAutoRefresh();
     } catch (e) {
         console.error("Failed to load configs", e);
+    }
+}
+
+function switchOsTab(osId) {
+    try { localStorage.setItem('active_os_tab', osId); } catch(e){}
+    document.querySelectorAll('.os-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        btn.style.borderColor = 'var(--border-subtle)';
+        btn.style.background = 'transparent';
+        btn.style.color = 'var(--text-muted)';
+        btn.style.fontWeight = 'normal';
+    });
+    document.querySelectorAll('.os-guide-card').forEach(card => {
+        card.style.display = 'none';
+    });
+
+    const activeBtn = document.getElementById('os-btn-' + osId);
+    const activeCard = document.getElementById('os-card-' + osId);
+
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+        activeBtn.style.borderColor = '#eab308';
+        activeBtn.style.background = 'rgba(234, 179, 8, 0.15)';
+        activeBtn.style.color = '#ffffff';
+        activeBtn.style.fontWeight = '700';
+    }
+    if (activeCard) {
+        activeCard.style.display = 'block';
+    }
+}
+
+function startLiveAutoRefresh() {
+    if (liveRefreshTimer) clearInterval(liveRefreshTimer);
+    
+    let intervalSec = 4;
+    try {
+        const savedRate = localStorage.getItem('dashboard_refresh_rate');
+        if (savedRate !== null && !isNaN(parseInt(savedRate))) {
+            intervalSec = parseInt(savedRate);
+        } else if (configSnapshot["REFRESH_TIME"] !== undefined) {
+            intervalSec = parseInt(configSnapshot["REFRESH_TIME"]);
+        }
+    } catch(e) {
+        if (configSnapshot["REFRESH_TIME"] !== undefined) {
+            intervalSec = parseInt(configSnapshot["REFRESH_TIME"]);
+        }
+    }
+    
+    const headerSel = document.getElementById('header-refresh-select');
+    if (headerSel) headerSel.value = String(intervalSec);
+    const inputEl = document.getElementById('REFRESH_TIME');
+    if (inputEl) inputEl.value = intervalSec;
+
+    if (isNaN(intervalSec) || intervalSec <= 0) {
+        currentRefreshIntervalSeconds = 0;
+        return;
+    }
+
+    currentRefreshIntervalSeconds = intervalSec;
+    const ms = currentRefreshIntervalSeconds * 1000;
+
+    pollTelemetry();
+
+    liveRefreshTimer = setInterval(() => {
+        pollTelemetry();
+        
+        const activePane = document.querySelector('.panel-pane.active');
+        if (activePane) {
+            if (activePane.id === 'pane-router') {
+                fetchRouterStatus();
+            } else if (activePane.id === 'pane-dev') {
+                fetchDevPayloads();
+            }
+        }
+    }, ms);
+}
+
+function onHeaderRefreshRateChange(val) {
+    const sec = parseInt(val);
+    configSnapshot["REFRESH_TIME"] = sec;
+    try {
+        localStorage.setItem('dashboard_refresh_rate', sec);
+    } catch(e) {}
+    const inputEl = document.getElementById('REFRESH_TIME');
+    if (inputEl) inputEl.value = sec;
+    
+    startLiveAutoRefresh();
+    if (sec > 0) {
+        showToast(`Live auto-refresh rate set to ${sec}s`, 'success');
+    } else {
+        showToast('Live auto-refresh paused', 'warning');
     }
 }
 
@@ -166,6 +259,7 @@ function showToast(message, type = "success") {
 
 function switchPane(paneId, btnElement = null) {
     if (!paneId) return;
+    try { localStorage.setItem('active_pane', paneId); } catch(e){}
 
     document.querySelectorAll('.control-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.panel-pane').forEach(pane => pane.classList.remove('active'));
@@ -313,6 +407,10 @@ async function fetchRouterStatus() {
                 <td style="padding: 0.75rem 1rem; color: var(--text-muted);">${cb.failure_count || 0}</td>
                 <td style="padding: 0.75rem 1rem;"><span style="color: ${headroomColor}; font-weight: 700;">${rl.has_headroom ? 'YES (≥10%)' : 'NO (LIMITED)'}</span></td>
                 <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">${reqRem} req / ${tokRem} tok</td>
+                <td style="padding: 0.75rem 1rem; text-align: right; white-space: nowrap;">
+                    <button type="button" class="btn-alt" style="padding: 0.35rem 0.65rem; font-size: 0.7rem; border-color: rgba(34, 197, 94, 0.4); color: #4ade80; margin-right: 6px;" onclick="handleCircuitAction('${modelId}', 'reset')" title="Clear Timeout & Open Traffic (Reset to CLOSED)">🔓 Open (Reset)</button>
+                    <button type="button" class="btn-alt" style="padding: 0.35rem 0.65rem; font-size: 0.7rem; border-color: rgba(248, 113, 113, 0.4); color: #f87171;" onclick="handleCircuitAction('${modelId}', 'trip')" title="Block Model & Extend Timeout (1m -> 5m -> 10m -> 15m -> 30m)">🔒 Close (+1m/5m)</button>
+                </td>
             `;
             tbody.appendChild(tr);
         }
@@ -320,6 +418,26 @@ async function fetchRouterStatus() {
         console.error("Failed to fetch router status:", e);
     }
 }
+
+async function handleCircuitAction(modelId, action) {
+    try {
+        const resp = await fetch('/api/circuit-breaker/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model_id: modelId, action: action })
+        });
+        const res = await resp.json();
+        if (res.status === 'success') {
+            showToast(res.message, "success");
+            await fetchRouterStatus();
+        } else {
+            showToast("Circuit action failed: " + res.message, "error");
+        }
+    } catch (e) {
+        showToast("Error updating circuit breaker state.", "error");
+    }
+}
+
 
 // DEV MODE: JSON Payload Inspector & Beautifier
 let activeModalPayload = null;
@@ -356,15 +474,24 @@ function syntaxHighlightJson(json) {
 }
 
 class PayloadDataTable {
-    constructor(tableBodyId) {
-        this.tbodyId = tableBodyId;
+    constructor(tbodyId) {
+        this.tbodyId = tbodyId;
         this.rawPayloads = [];
         this.filterQuery = '';
         this.cache = new Map();
+        this.currentPage = 1;
+        this.pageSize = 20;
+        this.totalItems = 0;
+        this.totalPages = 1;
     }
 
-    setPayloads(payloads) {
-        this.rawPayloads = payloads || [];
+    setServerData(data) {
+        this.rawPayloads = data.payloads || [];
+        this.totalItems = data.total !== undefined ? data.total : this.rawPayloads.length;
+        this.currentPage = data.page || 1;
+        this.totalPages = data.total_pages || 1;
+        this.pageSize = data.limit || this.pageSize;
+
         this.cache.clear();
         this.rawPayloads.forEach(p => {
             if (p.id) this.cache.set(p.id, p);
@@ -376,44 +503,44 @@ class PayloadDataTable {
         return this.cache.get(reqId) || null;
     }
 
-    setFilter(query) {
-        this.filterQuery = (query || '').toLowerCase().trim();
-        this.render();
+    setPageSize(size) {
+        this.pageSize = size;
+        this.currentPage = 1;
+        fetchDevPayloads();
     }
 
-    getFilteredData() {
-        if (!this.filterQuery) return this.rawPayloads;
-        return this.rawPayloads.filter(req => {
-            const clientModel = (req.client_model || '').toLowerCase();
-            const mappedModel = (req.mapped_model || '').toLowerCase();
-            const path = (req.path || '').toLowerCase();
-            const method = (req.method || '').toLowerCase();
-            const reqBody = typeof req.request_body === 'string' ? req.request_body.toLowerCase() : JSON.stringify(req.request_body || {}).toLowerCase();
-            const respBody = typeof req.response_body === 'string' ? req.response_body.toLowerCase() : JSON.stringify(req.response_body || {}).toLowerCase();
+    setFilter(query) {
+        this.filterQuery = (query || '').trim();
+        this.currentPage = 1;
+        fetchDevPayloads();
+    }
 
-            return clientModel.includes(this.filterQuery) ||
-                   mappedModel.includes(this.filterQuery) ||
-                   path.includes(this.filterQuery) ||
-                   method.includes(this.filterQuery) ||
-                   reqBody.includes(this.filterQuery) ||
-                   respBody.includes(this.filterQuery);
-        });
+    changePage(delta) {
+        const nextP = this.currentPage + delta;
+        if (nextP >= 1 && nextP <= this.totalPages) {
+            this.currentPage = nextP;
+            fetchDevPayloads();
+        }
     }
 
     render() {
         const tbody = document.getElementById(this.tbodyId);
         if (!tbody) return;
-        const filtered = this.getFilteredData();
+
         tbody.innerHTML = '';
 
-        if (filtered.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">
-                ${this.rawPayloads.length === 0 ? 'No Claude Code requests captured yet. Send a request to see JSON payloads here.' : 'No payloads match your search query.'}
+        if (this.rawPayloads.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="8" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">
+                ${this.filterQuery ? 'No payloads match your search query.' : 'No Claude Code requests captured yet. Send a request to see JSON payloads here.'}
             </td></tr>`;
+            this.updatePaginationUI(0, 0, 0, 1, 1);
             return;
         }
 
-        filtered.forEach(req => {
+        const startIdx = (this.currentPage - 1) * (this.pageSize === 999999 ? this.totalItems : this.pageSize);
+        const endIdx = startIdx + this.rawPayloads.length;
+
+        this.rawPayloads.forEach(req => {
             const tr = document.createElement('tr');
             tr.style.borderBottom = '1px solid var(--border-subtle)';
 
@@ -436,21 +563,214 @@ class PayloadDataTable {
             `;
             tbody.appendChild(tr);
         });
+
+        this.updatePaginationUI(startIdx + 1, endIdx, this.totalItems, this.currentPage, this.totalPages);
+    }
+
+    updatePaginationUI(from, to, total, page, maxPage) {
+        const infoEl = document.getElementById('inspector-page-info');
+        const numEl = document.getElementById('inspector-page-number');
+        const btnPrev = document.getElementById('inspector-btn-prev');
+        const btnNext = document.getElementById('inspector-btn-next');
+
+        if (infoEl) infoEl.innerText = total > 0 ? `Showing ${from}-${to} of ${total} requests` : 'Showing 0-0 of 0 requests';
+        if (numEl) numEl.innerText = `Page ${page} of ${maxPage}`;
+        if (btnPrev) btnPrev.disabled = page <= 1;
+        if (btnNext) btnNext.disabled = page >= maxPage;
     }
 }
 
 const devDataTable = new PayloadDataTable('dev-payloads-table-body');
+let devSearchDebounceTimer = null;
 
 function onDevSearchInput(val) {
-    devDataTable.setFilter(val);
+    if (devSearchDebounceTimer) clearTimeout(devSearchDebounceTimer);
+    devSearchDebounceTimer = setTimeout(() => {
+        devDataTable.setFilter(val);
+    }, 250);
 }
+
+function changeInspectorPage(delta) {
+    devDataTable.changePage(delta);
+}
+
+function changeInspectorPageSize(val) {
+    try { localStorage.setItem('inspector_page_size', val); } catch(e){}
+    const size = val === 'all' ? 999999 : (parseInt(val) || 20);
+    devDataTable.setPageSize(size);
+}
+
+function changeTracePageSize(val) {
+    try { localStorage.setItem('trace_page_size', val); } catch(e){}
+    tracePageSize = val === 'all' ? 999999 : (parseInt(val) || 20);
+    traceCurrentPage = 1;
+    renderTraceFeed();
+}
+
+function switchProviderTab(providerId) {
+    try { localStorage.setItem('active_provider_tab', providerId); } catch(e){}
+    document.querySelectorAll('.provider-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        btn.style.borderColor = 'var(--border-subtle)';
+        btn.style.background = 'transparent';
+        btn.style.color = 'var(--text-muted)';
+        btn.style.fontWeight = 'normal';
+    });
+    document.querySelectorAll('.provider-tab-card').forEach(card => {
+        card.style.display = 'none';
+    });
+
+    const activeBtn = document.getElementById('ptab-btn-' + providerId);
+    const activeCard = document.getElementById('ptab-card-' + providerId);
+
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+        activeBtn.style.borderColor = '#eab308';
+        activeBtn.style.background = 'rgba(234, 179, 8, 0.15)';
+        activeBtn.style.color = '#ffffff';
+        activeBtn.style.fontWeight = '700';
+    }
+    if (activeCard) {
+        activeCard.style.display = 'block';
+    }
+}
+
+function applySelectedPreset() {
+    const sel = document.getElementById('provider-preset-select');
+    const providerKey = sel ? sel.value : '';
+    if (!providerKey) {
+        showToast('Select a provider from the dropdown first.', 'error');
+        return;
+    }
+    applyProviderPreset(providerKey);
+}
+
+function applyProviderPreset(providerKey) {
+    const preset = PROVIDER_PRESETS[providerKey];
+    if (!preset) return;
+    const fields = ['PROVIDER_RATE_LIMIT', 'PROVIDER_RATE_WINDOW', 'PROVIDER_MAX_CONCURRENCY',
+                    'HTTP_READ_TIMEOUT', 'HTTP_WRITE_TIMEOUT', 'HTTP_CONNECT_TIMEOUT'];
+    fields.forEach(field => {
+        const el = document.getElementById(field);
+        if (el) el.value = preset[field];
+    });
+
+    const pUpper = providerKey.toUpperCase();
+    const pFields = [
+        ['RPM', preset.PROVIDER_RATE_LIMIT || 30],
+        ['TPM', 200000],
+        ['RPD', preset.PROVIDER_RPD || 1000],
+        ['RATE_WINDOW', preset.PROVIDER_RATE_WINDOW || 60],
+        ['MAX_CONCURRENCY', preset.PROVIDER_MAX_CONCURRENCY || 5],
+        ['CONTEXT', 128000],
+        ['MAX_OUTPUT', 16384],
+        ['HTTP_READ_TIMEOUT', preset.HTTP_READ_TIMEOUT || 120],
+        ['HTTP_WRITE_TIMEOUT', preset.HTTP_WRITE_TIMEOUT || 10],
+        ['HTTP_CONNECT_TIMEOUT', preset.HTTP_CONNECT_TIMEOUT || 2],
+    ];
+
+    pFields.forEach(([fSuffix, defaultVal]) => {
+        const el = document.getElementById(`PROVIDER_${pUpper}_${fSuffix}`);
+        if (el && (!el.value || el.value === "0")) {
+            el.value = defaultVal;
+        }
+    });
+
+    switchProviderTab(providerKey);
+
+    const descEl = document.getElementById('preset-desc');
+    if (descEl) descEl.innerText = preset.label;
+    showToast('Preset applied. Click Commit to save.', 'success');
+}
+
+// Explicitly bind all event handlers to window object for HTML inline access
+window.switchPane = switchPane;
+window.fetchModels = fetchModels;
+window.refreshModelsList = refreshModelsList;
+window.loadConfigs = loadConfigs;
+window.revertConfigs = revertConfigs;
+window.saveConfigs = saveConfigs;
+window.fetchRouterStatus = fetchRouterStatus;
+window.fetchDevPayloads = fetchDevPayloads;
+window.openJsonModal = openJsonModal;
+window.closeJsonModal = closeJsonModal;
+window.closeJsonModalDirect = closeJsonModalDirect;
+window.toggleModalLayout = toggleModalLayout;
+window.copyRequestJson = copyRequestJson;
+window.copyResponseJson = copyResponseJson;
+window.copyAllModalJson = copyAllModalJson;
+window.onDevSearchInput = onDevSearchInput;
+window.toggleMask = toggleMask;
+window.applySelectedPreset = applySelectedPreset;
+window.handleAutocomplete = handleAutocomplete;
+window.blurAutocomplete = blurAutocomplete;
+window.selectSuggestion = selectSuggestion;
+window.focusTagInput = focusTagInput;
+window.handleTagInputKeyDown = handleTagInputKeyDown;
+window.handleInputKeyDown = handleInputKeyDown;
+window.switchDevSubTab = switchDevSubTab;
+window.switchOsTab = switchOsTab;
+window.handleCircuitAction = handleCircuitAction;
+window.switchProviderTab = switchProviderTab;
+window.startLiveAutoRefresh = startLiveAutoRefresh;
+window.onHeaderRefreshRateChange = onHeaderRefreshRateChange;
+window.changeInspectorPage = changeInspectorPage;
+window.changeTracePage = changeTracePage;
+window.changeInspectorPageSize = changeInspectorPageSize;
+window.changeTracePageSize = changeTracePageSize;
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Restore Saved UI Preferences from localStorage
+    try {
+        const savedInspSize = localStorage.getItem('inspector_page_size');
+        if (savedInspSize) {
+            const inspSel = document.getElementById('inspector-page-size');
+            if (inspSel) inspSel.value = savedInspSize;
+            devDataTable.pageSize = savedInspSize === 'all' ? 999999 : (parseInt(savedInspSize) || 20);
+        }
+
+        const savedTraceSize = localStorage.getItem('trace_page_size');
+        if (savedTraceSize) {
+            const traceSel = document.getElementById('trace-page-size');
+            if (traceSel) traceSel.value = savedTraceSize;
+            tracePageSize = savedTraceSize === 'all' ? 999999 : (parseInt(savedTraceSize) || 20);
+        }
+
+        const savedDevSubTab = localStorage.getItem('active_dev_subtab');
+        if (savedDevSubTab) {
+            switchDevSubTab(savedDevSubTab);
+        }
+
+        const savedOsTab = localStorage.getItem('active_os_tab');
+        if (savedOsTab && document.getElementById('os-card-' + savedOsTab)) {
+            switchOsTab(savedOsTab);
+        }
+
+        const savedProviderTab = localStorage.getItem('active_provider_tab');
+        if (savedProviderTab && document.getElementById('ptab-card-' + savedProviderTab)) {
+            switchProviderTab(savedProviderTab);
+        }
+
+        const savedPane = localStorage.getItem('active_pane');
+        if (savedPane && document.getElementById(savedPane)) {
+            switchPane(savedPane);
+        }
+    } catch(e) {
+        console.error("Failed to restore preferences from localStorage:", e);
+    }
+
+    fetchModels();
+    loadConfigs();
+    startLiveAutoRefresh();
+});
 
 async function fetchDevPayloads() {
     try {
-        const resp = await fetch('/api/dev/payloads');
+        const url = `/api/dev/payloads?limit=${devDataTable.pageSize}&page=${devDataTable.currentPage}&query=${encodeURIComponent(devDataTable.filterQuery)}`;
+        const resp = await fetch(url);
         const data = await resp.json();
-        if (data && data.payloads) {
-            devDataTable.setPayloads(data.payloads);
+        if (data) {
+            devDataTable.setServerData(data);
         }
     } catch (e) {
         console.error("Failed to fetch dev payloads:", e);
@@ -458,6 +778,7 @@ async function fetchDevPayloads() {
 }
 
 function switchDevSubTab(tab) {
+    try { localStorage.setItem('active_dev_subtab', tab); } catch(e){}
     const inspectorEl = document.getElementById('dev-subtab-inspector');
     const traceEl = document.getElementById('dev-subtab-trace');
     const btnInspector = document.getElementById('dev-subtab-btn-inspector');
@@ -469,19 +790,27 @@ function switchDevSubTab(tab) {
         traceEl.style.display = 'block';
         btnInspector.classList.remove('active');
         btnInspector.style.borderColor = 'var(--border-subtle)';
+        btnInspector.style.background = 'transparent';
         btnInspector.style.color = 'var(--text-muted)';
+        btnInspector.style.fontWeight = 'normal';
         btnTrace.classList.add('active');
-        btnTrace.style.borderColor = 'rgba(234, 179, 8, 0.4)';
-        btnTrace.style.color = '#fef08a';
+        btnTrace.style.borderColor = '#eab308';
+        btnTrace.style.background = 'rgba(234, 179, 8, 0.15)';
+        btnTrace.style.color = '#ffffff';
+        btnTrace.style.fontWeight = '700';
     } else {
         inspectorEl.style.display = 'block';
         traceEl.style.display = 'none';
         btnTrace.classList.remove('active');
         btnTrace.style.borderColor = 'var(--border-subtle)';
+        btnTrace.style.background = 'transparent';
         btnTrace.style.color = 'var(--text-muted)';
+        btnTrace.style.fontWeight = 'normal';
         btnInspector.classList.add('active');
-        btnInspector.style.borderColor = 'rgba(234, 179, 8, 0.4)';
-        btnInspector.style.color = '#fef08a';
+        btnInspector.style.borderColor = '#eab308';
+        btnInspector.style.background = 'rgba(234, 179, 8, 0.15)';
+        btnInspector.style.color = '#ffffff';
+        btnInspector.style.fontWeight = '700';
     }
 }
 
@@ -629,27 +958,31 @@ function toggleMask(inputId) {
 async function runDiagnostics() {
     showToast("Running system diagnostics...", "success");
     const consoleEl = document.getElementById('terminalConsole');
-    consoleEl.innerHTML = '<div class="terminal-line">> Initializing diagnostic check...</div>';
+    if (consoleEl) {
+        consoleEl.innerHTML = '<div class="terminal-line">> Initializing diagnostic check...</div>';
+    }
     try {
         const resp = await fetch('/api/diagnostics');
         const data = await resp.json();
 
-        consoleEl.innerHTML = '';
+        const logs = (data && Array.isArray(data.logs)) ? data.logs : ["System diagnostic data structure unexpected."];
+        if (consoleEl) consoleEl.innerHTML = '';
 
         let i = 0;
         function printLine() {
-            if (i < data.logs.length) {
+            if (!consoleEl) return;
+            if (i < logs.length) {
                 const div = document.createElement('div');
                 div.className = 'terminal-line';
-                div.innerText = data.logs[i];
+                div.innerText = logs[i];
                 consoleEl.appendChild(div);
                 consoleEl.scrollTop = consoleEl.scrollHeight;
                 i++;
-                setTimeout(printLine, 150);
+                setTimeout(printLine, 80);
             } else {
                 const finalDiv = document.createElement('div');
                 finalDiv.className = 'terminal-line';
-                if (data.has_errors) {
+                if (data && data.has_errors) {
                     finalDiv.style.color = '#f87171';
                     finalDiv.innerText = 'DIAGNOSTICS COMPLETE - ADVISORIES FOUND.';
                     showToast("Diagnostics completed with advisories.", "error");
@@ -664,7 +997,7 @@ async function runDiagnostics() {
         }
         printLine();
     } catch (e) {
-        consoleEl.innerHTML += '<div class="terminal-line" style="color: #f87171">> System connection failed: ' + e + '</div>';
+        if (consoleEl) consoleEl.innerHTML += '<div class="terminal-line" style="color: #f87171">> System connection failed: ' + e + '</div>';
         showToast("Diagnostics check failed.", "error");
     }
 }
@@ -709,91 +1042,135 @@ async function pollTelemetry() {
             }
         }
 
-        // Render Live Request Trace log feed
-        const feedBody = document.getElementById('live-request-feed-body');
-        if (feedBody) {
-            if (data.recent_requests && data.recent_requests.length > 0) {
-                feedBody.innerHTML = '';
-                // Display in reverse order (newest first)
-                const sorted = [...data.recent_requests].reverse();
-                sorted.forEach(req => {
-                    const tr = document.createElement('tr');
-                    
-                    const tdTime = document.createElement('td');
-                    tdTime.innerText = req.timestamp;
-                    tr.appendChild(tdTime);
-
-                    const tdPath = document.createElement('td');
-                    tdPath.innerText = `${req.method} ${req.path}`;
-                    tr.appendChild(tdPath);
-
-                    const tdClient = document.createElement('td');
-                    tdClient.innerText = req.client_model;
-                    tr.appendChild(tdClient);
-
-                    const tdUpstream = document.createElement('td');
-                    tdUpstream.innerText = req.mapped_model || req.target_model || '-';
-                    tr.appendChild(tdUpstream);
-
-                    const tdLatency = document.createElement('td');
-                    const dur = req.duration_ms !== undefined ? req.duration_ms : (req.latency_ms || 0);
-                    tdLatency.innerText = `${dur} ms`;
-                    tr.appendChild(tdLatency);
-
-                    const tdStatus = document.createElement('td');
-                    const spanStatus = document.createElement('span');
-                    spanStatus.className = 'feed-badge ' + (req.status_code === 200 ? 'status-200' : 'status-error');
-                    spanStatus.innerText = req.status_code;
-                    tdStatus.appendChild(spanStatus);
-
-                    if (req.mocked) {
-                        const spanMock = document.createElement('span');
-                        spanMock.className = 'feed-badge mock';
-                        spanMock.style.marginLeft = '6px';
-                        spanMock.innerText = 'MOCK';
-                        tdStatus.appendChild(spanMock);
-                    }
-
-                    if (req.fallbacks_used && req.fallbacks_used.length > 0) {
-                        const spanFb = document.createElement('span');
-                        spanFb.className = 'feed-badge mock';
-                        spanFb.style.marginLeft = '6px';
-                        spanFb.style.background = 'rgba(234, 179, 8, 0.2)';
-                        spanFb.style.color = '#fef08a';
-                        spanFb.innerText = `FALLBACK (${req.fallbacks_used.length})`;
-                        tdStatus.appendChild(spanFb);
-                    }
-
-                    if (req.id) {
-                        const btnInspect = document.createElement('button');
-                        btnInspect.type = 'button';
-                        btnInspect.className = 'btn-alt';
-                        btnInspect.style.marginLeft = '8px';
-                        btnInspect.style.padding = '2px 6px';
-                        btnInspect.style.fontSize = '0.65rem';
-                        btnInspect.style.borderColor = 'rgba(234, 179, 8, 0.4)';
-                        btnInspect.style.color = '#fef08a';
-                        btnInspect.innerText = '{ JSON }';
-                        btnInspect.onclick = () => openJsonModal(req.id);
-                        tdStatus.appendChild(btnInspect);
-                    }
-
-                    tr.appendChild(tdStatus);
-                    feedBody.appendChild(tr);
-                });
-            } else {
-                feedBody.innerHTML = `<tr>
-                    <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 20px;">No operational traffic logged. Awaiting API events...</td>
-                </tr>`;
-            }
-        }
+        // Render Live Request Trace log feed with pagination
+        traceRawRequests = data.recent_requests || [];
+        renderTraceFeed();
 
         // Automatically refresh Dev Mode payloads on every telemetry poll
         await fetchDevPayloads();
 
     } catch (e) {
-        console.error("Telemetry link lost", e);
+        console.error("Telemetry polling failed", e);
     }
+}
+
+let traceCurrentPage = 1;
+let tracePageSize = 20;
+let traceRawRequests = [];
+
+function changeTracePage(delta) {
+    const maxPage = Math.max(1, Math.ceil(traceRawRequests.length / tracePageSize));
+    traceCurrentPage = Math.min(maxPage, Math.max(1, traceCurrentPage + delta));
+    renderTraceFeed();
+}
+
+function changeTracePageSize(val) {
+    tracePageSize = val === 'all' ? 999999 : (parseInt(val) || 20);
+    traceCurrentPage = 1;
+    renderTraceFeed();
+}
+
+function renderTraceFeed() {
+    const feedBody = document.getElementById('live-request-feed-body');
+    if (!feedBody) return;
+
+    if (!traceRawRequests || traceRawRequests.length === 0) {
+        feedBody.innerHTML = `<tr>
+            <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 20px;">No operational traffic logged. Awaiting API events...</td>
+        </tr>`;
+        updateTracePaginationUI(0, 0, 0, 1, 1);
+        return;
+    }
+
+    const sorted = [...traceRawRequests].reverse();
+    const totalItems = sorted.length;
+    const maxPage = Math.max(1, Math.ceil(totalItems / tracePageSize));
+    traceCurrentPage = Math.min(maxPage, Math.max(1, traceCurrentPage));
+
+    const startIdx = (traceCurrentPage - 1) * tracePageSize;
+    const endIdx = Math.min(totalItems, startIdx + tracePageSize);
+    const pageItems = sorted.slice(startIdx, endIdx);
+
+    feedBody.innerHTML = '';
+    pageItems.forEach(req => {
+        const tr = document.createElement('tr');
+        
+        const tdTime = document.createElement('td');
+        tdTime.innerText = req.timestamp;
+        tr.appendChild(tdTime);
+
+        const tdPath = document.createElement('td');
+        tdPath.innerText = `${req.method} ${req.path}`;
+        tr.appendChild(tdPath);
+
+        const tdClient = document.createElement('td');
+        tdClient.innerText = req.client_model;
+        tr.appendChild(tdClient);
+
+        const tdUpstream = document.createElement('td');
+        tdUpstream.innerText = req.mapped_model || req.target_model || '-';
+        tr.appendChild(tdUpstream);
+
+        const tdLatency = document.createElement('td');
+        const dur = req.duration_ms !== undefined ? req.duration_ms : (req.latency_ms || 0);
+        tdLatency.innerText = `${dur} ms`;
+        tr.appendChild(tdLatency);
+
+        const tdStatus = document.createElement('td');
+        const spanStatus = document.createElement('span');
+        spanStatus.className = 'feed-badge ' + (req.status_code === 200 ? 'status-200' : 'status-error');
+        spanStatus.innerText = req.status_code;
+        tdStatus.appendChild(spanStatus);
+
+        if (req.mocked) {
+            const spanMock = document.createElement('span');
+            spanMock.className = 'feed-badge mock';
+            spanMock.style.marginLeft = '6px';
+            spanMock.innerText = 'MOCK';
+            tdStatus.appendChild(spanMock);
+        }
+
+        if (req.fallbacks_used && req.fallbacks_used.length > 0) {
+            const spanFb = document.createElement('span');
+            spanFb.className = 'feed-badge mock';
+            spanFb.style.marginLeft = '6px';
+            spanFb.style.background = 'rgba(234, 179, 8, 0.2)';
+            spanFb.style.color = '#fef08a';
+            spanFb.innerText = `FALLBACK (${req.fallbacks_used.length})`;
+            tdStatus.appendChild(spanFb);
+        }
+
+        if (req.id) {
+            const btnInspect = document.createElement('button');
+            btnInspect.type = 'button';
+            btnInspect.className = 'btn-alt';
+            btnInspect.style.marginLeft = '8px';
+            btnInspect.style.padding = '2px 6px';
+            btnInspect.style.fontSize = '0.65rem';
+            btnInspect.style.borderColor = 'rgba(234, 179, 8, 0.4)';
+            btnInspect.style.color = '#fef08a';
+            btnInspect.innerText = '{ JSON }';
+            btnInspect.onclick = () => openJsonModal(req.id);
+            tdStatus.appendChild(btnInspect);
+        }
+
+        tr.appendChild(tdStatus);
+        feedBody.appendChild(tr);
+    });
+
+    updateTracePaginationUI(startIdx + 1, endIdx, totalItems, traceCurrentPage, maxPage);
+}
+
+function updateTracePaginationUI(from, to, total, page, maxPage) {
+    const infoEl = document.getElementById('trace-page-info');
+    const numEl = document.getElementById('trace-page-number');
+    const btnPrev = document.getElementById('trace-btn-prev');
+    const btnNext = document.getElementById('trace-btn-next');
+
+    if (infoEl) infoEl.innerText = total > 0 ? `Showing ${from}-${to} of ${total} events` : 'Showing 0-0 of 0 events';
+    if (numEl) numEl.innerText = `Page ${page} of ${maxPage}`;
+    if (btnPrev) btnPrev.disabled = page <= 1;
+    if (btnNext) btnNext.disabled = page >= maxPage;
 }
 
 let activeSuggestionIndex = -1;
@@ -1167,53 +1544,4 @@ const PROVIDER_PRESETS = {
     },
 };
 
-function applySelectedPreset() {
-    const sel = document.getElementById('provider-preset-select');
-    const providerKey = sel ? sel.value : '';
-    if (!providerKey) {
-        showToast('Select a provider from the dropdown first.', 'error');
-        return;
-    }
-    applyProviderPreset(providerKey);
-}
 
-function applyProviderPreset(providerKey) {
-    const preset = PROVIDER_PRESETS[providerKey];
-    if (!preset) return;
-    const fields = ['PROVIDER_RATE_LIMIT', 'PROVIDER_RATE_WINDOW', 'PROVIDER_MAX_CONCURRENCY',
-                    'HTTP_READ_TIMEOUT', 'HTTP_WRITE_TIMEOUT', 'HTTP_CONNECT_TIMEOUT'];
-    fields.forEach(field => {
-        const el = document.getElementById(field);
-        if (el) el.value = preset[field];
-    });
-    const descEl = document.getElementById('preset-desc');
-    if (descEl) descEl.innerText = preset.label;
-    showToast('Preset applied. Click Commit to save.', 'success');
-}
-
-// Explicitly bind all event handlers to window object for HTML inline access
-window.switchPane = switchPane;
-window.fetchModels = fetchModels;
-window.refreshModelsList = refreshModelsList;
-window.loadConfigs = loadConfigs;
-window.revertConfigs = revertConfigs;
-window.saveConfigs = saveConfigs;
-window.fetchRouterStatus = fetchRouterStatus;
-window.fetchDevPayloads = fetchDevPayloads;
-window.openJsonModal = openJsonModal;
-window.closeJsonModal = closeJsonModal;
-window.closeJsonModalDirect = closeJsonModalDirect;
-window.toggleModalLayout = toggleModalLayout;
-window.copyRequestJson = copyRequestJson;
-window.copyResponseJson = copyResponseJson;
-window.copyAllModalJson = copyAllModalJson;
-window.onDevSearchInput = onDevSearchInput;
-window.toggleMask = toggleMask;
-window.applySelectedPreset = applySelectedPreset;
-window.handleAutocomplete = handleAutocomplete;
-window.blurAutocomplete = blurAutocomplete;
-window.selectSuggestion = selectSuggestion;
-window.focusTagInput = focusTagInput;
-window.handleTagInputKeyDown = handleTagInputKeyDown;
-window.handleInputKeyDown = handleInputKeyDown;
-window.switchDevSubTab = switchDevSubTab;

@@ -83,6 +83,15 @@ class TokenBudgetGuard:
     def __init__(self, model_id: str) -> None:
         self.model_id = model_id
         self.metadata: ModelMetadata = model_registry.get_metadata(model_id)
+        if "/" in model_id:
+            provider_part = model_id.split("/", 1)[0]
+            from config import settings
+            p_config = settings.get_provider_config(provider_part)
+            if p_config:
+                if p_config.get("context"):
+                    self.metadata.context = p_config["context"]
+                if p_config.get("max_output"):
+                    self.metadata.max_output = p_config["max_output"]
         self._enc = _get_encoding(model_id)
 
     def count_prompt_tokens(

@@ -162,7 +162,13 @@ def get_key_statuses() -> dict[str, str]:
         "MODEL_SONNET_1M",
         "MODEL_HAIKU",
         "MODEL",
+        "REFRESH_TIME",
     ]
+
+    from config import PROVIDER_DEFAULTS
+    for p in PROVIDER_DEFAULTS:
+        for field_name in ["rpm", "tpm", "rpd", "rate_window", "max_concurrency", "context", "max_output", "http_read_timeout", "http_write_timeout", "http_connect_timeout"]:
+            managed_keys.append(f"PROVIDER_{p.upper()}_{field_name.upper()}")
 
     for k in managed_keys:
         val_in_env = k in env_keys
@@ -175,6 +181,7 @@ def get_key_statuses() -> dict[str, str]:
         else:
             statuses[k] = "Not Set"
     return statuses
+
 
 
 def save_env_values(configs: dict[str, Any]) -> None:
@@ -329,6 +336,7 @@ async def get_config() -> JSONResponse:
         "MODEL_HAIKU": settings.MODEL_HAIKU,
         "MODEL": settings.MODEL,
 
+        "REFRESH_TIME": settings.REFRESH_TIME,
         "PROVIDER_RATE_LIMIT": settings.PROVIDER_RATE_LIMIT,
         "PROVIDER_RATE_WINDOW": settings.PROVIDER_RATE_WINDOW,
         "PROVIDER_MAX_CONCURRENCY": settings.PROVIDER_MAX_CONCURRENCY,
@@ -354,6 +362,13 @@ async def get_config() -> JSONResponse:
         "THINKING_MODE_HAIKU": settings.THINKING_MODE_HAIKU,
         "THINKING_MODE_DEFAULT": settings.THINKING_MODE_DEFAULT,
     }
+
+    from config import PROVIDER_DEFAULTS
+    for p in PROVIDER_DEFAULTS:
+        p_cfg = settings.get_provider_config(p)
+        for field_name, val in p_cfg.items():
+            k = f"PROVIDER_{p.upper()}_{field_name.upper()}"
+            config_data[k] = getattr(settings, k, val)
 
     fallbacks_data = {}
     for alias, entry in model_registry._entries.items():
@@ -466,6 +481,53 @@ async def get_stats() -> JSONResponse:
     )
 
 
+class CircuitBreakerActionRequest(BaseModel):
+    model_id: str
+    action: str  # "reset" (enable/open traffic) or "trip" (block/close traffic)
+
+
+@router.post("/api/circuit-breaker/action")
+async def handle_circuit_breaker_action(req: CircuitBreakerActionRequest) -> JSONResponse:
+    """Manually trip or reset a model's circuit breaker from Dashboard."""
+    from core.router.circuit_breaker import circuit_breaker_registry
+
+    if not req.model_id:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "model_id is required"},
+        )
+
+    cb = circuit_breaker_registry.get(req.model_id)
+
+    action_lower = req.action.lower().strip()
+    if action_lower in ("reset", "open_traffic", "enable", "clear", "open"):
+        # User requested to clear timeout & reset circuit breaker to working/CLOSED state
+        cb.reset()
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": f"Circuit breaker for '{req.model_id}' reset to CLOSED (Healthy). Timeout cleared.",
+                "circuit_breaker": cb.status_dict(),
+            }
+        )
+    elif action_lower in ("trip", "block", "close_traffic", "disable", "close"):
+        # User requested to block model / force circuit breaker to OPEN state (extending timeout 1m -> 5m -> 10m -> 15m -> 30m -> 60m)
+        new_timeout = cb.trip_or_extend(reason="Manually blocked via Dashboard")
+        mins = int(new_timeout // 60)
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": f"Circuit breaker for '{req.model_id}' forced OPEN (Blocked) for {mins} min timeout.",
+                "circuit_breaker": cb.status_dict(),
+            }
+        )
+    else:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": f"Invalid action '{req.action}'. Expected 'reset' or 'trip'."},
+        )
+
+
 @router.get("/api/router-status")
 async def get_router_status() -> JSONResponse:
     """Per-model circuit breaker, rate limit status, and client request resolution mappings."""
@@ -520,6 +582,7 @@ async def get_router_status() -> JSONResponse:
         )
 
 
+    from core.router.daily_tracker import daily_request_tracker
     return JSONResponse(
         content={
             "summary": {
@@ -529,11 +592,13 @@ async def get_router_status() -> JSONResponse:
             },
             "client_mappings": mappings_matrix,
             "models": status_data,
+            "daily_rpd": daily_request_tracker.all_statuses(),
         }
     )
 
 
 @router.get("/api/doctor")
+@router.get("/api/diagnostics")
 async def run_doctor_checks() -> JSONResponse:
     """Run full proxy diagnostic health check."""
     reports = []
@@ -584,15 +649,14 @@ async def run_doctor_checks() -> JSONResponse:
 
 
 @router.get("/api/dev/payloads")
-async def get_dev_payloads() -> JSONResponse:
-    """Return captured dev mode request & response payloads for inspection."""
-    recent_dicts = stats.get_recent_dicts(include_payload=True)
-    return JSONResponse(
-        content={
-            "total_captured": len(recent_dicts),
-            "payloads": recent_dicts,
-        }
-    )
+async def get_dev_payloads(
+    limit: int = 20,
+    page: int = 1,
+    query: str = ""
+) -> JSONResponse:
+    """Return captured dev mode request & response payloads for inspection with server-side query filtering and RAM-saving pagination."""
+    res = stats.get_paginated_payloads(limit=limit, page=page, query=query)
+    return JSONResponse(content=res)
 
 
 @router.get("/api/dev/payloads/{req_id}")

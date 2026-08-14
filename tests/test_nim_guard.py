@@ -123,6 +123,7 @@ def test_gateway_nim_queue_timeout_triggers_openrouter_fallback():
     with (
         patch("core.gateway._get_provider", return_value=mock_provider),
         patch("core.gateway._check_auth", return_value=True),
+        patch("config.model_registry.get_fallbacks", return_value=["open_router/meta-llama/llama-3.3-70b-instruct:free"]),
     ):
         response = client.post("/v1/messages", json=payload)
 

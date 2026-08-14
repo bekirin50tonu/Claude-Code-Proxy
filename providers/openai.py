@@ -5,10 +5,12 @@ from typing import Any
 import httpx
 from loguru import logger
 
+from atomic.sanitizers.gemini_sanitizer import GeminiPayloadSanitizer
 from config import settings
 from providers.base import BaseProvider
 
 _key_counters: dict[str, int] = {}
+
 
 
 def _select_key(raw_key: str, provider_part: str) -> str:
@@ -122,10 +124,20 @@ class OpenAICompatibleProvider(BaseProvider):
             payload["tools"] = openai_tools
             payload["tool_choice"] = "auto"
 
+        provider_part_check = model.split("/", 1)[0] if "/" in model else ""
+
+        if provider_part_check == "gemini" or "gemini" in model.lower():
+            payload = await GeminiPayloadSanitizer.sanitize(payload)
+
+        p_cfg = settings.get_provider_config(provider_part_check) if provider_part_check else {}
+        connect_t = p_cfg.get("http_connect_timeout") or settings.HTTP_CONNECT_TIMEOUT
+        read_t = p_cfg.get("http_read_timeout") or settings.HTTP_READ_TIMEOUT
+        write_t = p_cfg.get("http_write_timeout") or settings.HTTP_WRITE_TIMEOUT
+
         timeout = httpx.Timeout(
-            connect=settings.HTTP_CONNECT_TIMEOUT,
-            read=settings.HTTP_READ_TIMEOUT,
-            write=settings.HTTP_WRITE_TIMEOUT,
+            connect=connect_t,
+            read=read_t,
+            write=write_t,
             pool=None,
         )
 

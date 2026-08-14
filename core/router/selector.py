@@ -89,12 +89,21 @@ class ModelSelector:
         headers: dict[str, str] | None = None,
         reason: str = "",
     ) -> None:
-        """Update circuit breaker and rate limiter state after request execution."""
+        """Update circuit breaker, rate limiter, and daily RPD state after request execution."""
+        provider = model_id.split("/", 1)[0] if "/" in model_id else "nvidia_nim"
+        from core.router.daily_tracker import daily_request_tracker
+        daily_request_tracker.record_request(provider)
+
         cb = circuit_breaker_registry.get(model_id)
         if success:
             await cb.record_success()
         else:
-            await cb.record_failure(reason=reason or "Upstream request failure")
+            reason_lower = (reason or "").lower()
+            if any(k in reason_lower for k in ["quota_exceeded", "daily_quota", "rpd limit", "daily limit", "quota exceeded"]):
+                daily_request_tracker.mark_exceeded(provider)
+                cb.force_open(f"Daily RPD quota exceeded ({reason})")
+            else:
+                await cb.record_failure(reason=reason or "Upstream request failure")
             logger.warning("Selector: failure recorded for '%s' (CB failures: %d, reason: %s)", model_id, cb._failure_count, reason)
 
         if headers:
