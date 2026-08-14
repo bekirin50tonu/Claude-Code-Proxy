@@ -24,7 +24,7 @@ TIMEOUT_STEPS = [
 ]
 
 STORAGE_FILE = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "storage", "circuit_breakers.json")
+    os.path.join(os.path.dirname(__file__), "..", "..", ".data", "circuit_breakers.json")
 )
 
 

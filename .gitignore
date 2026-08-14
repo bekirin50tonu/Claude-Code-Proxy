@@ -58,6 +58,8 @@ logs/
 *.sqlite
 *.db
 agent_workspace/
+.data/
+storage/
 .fcc/
 graphify-out/
 
