@@ -37,6 +37,8 @@ def record_request_log(
     request_body: dict[str, Any] | None = None,
     response_body: dict[str, Any] | str | None = None,
     headers: dict[str, str] | None = None,
+    error_details: dict[str, Any] | None = None,
+    attempt_history: list[dict[str, Any]] | None = None,
 ) -> None:
     stats.record_log(
         method,
@@ -50,6 +52,8 @@ def record_request_log(
         request_body=request_body,
         response_body=response_body,
         headers=headers,
+        error_details=error_details,
+        attempt_history=attempt_history,
     )
 
 
@@ -309,10 +313,18 @@ async def messages_endpoint(request: Request) -> Any:
 
     last_error: Exception | None = None
     tried_models: list[str] = []
+    attempt_history: list[dict[str, Any]] = []
 
     for mapped_model in candidates:
         if not model_selector._is_available(mapped_model):
             tried_models.append(mapped_model)
+            attempt_history.append({
+                "model": mapped_model,
+                "error_type": "CircuitBreakerOpen",
+                "error_message": "Model unavailable / circuit breaker open",
+                "status_code": 503,
+                "failure_reason": "Circuit Breaker Open",
+            })
             continue
 
         token_guard = TokenBudgetGuard(mapped_model)
@@ -385,6 +397,7 @@ async def messages_endpoint(request: Request) -> Any:
                                 fallbacks_used=tried_models,
                                 request_body=body,
                                 response_body=target_engine.get_summary_response(),
+                                attempt_history=attempt_history,
                             )
 
                     return StreamingResponse(
@@ -414,6 +427,7 @@ async def messages_endpoint(request: Request) -> Any:
                         fallbacks_used=tried_models,
                         request_body=body,
                         response_body=translated,
+                        attempt_history=attempt_history,
                     )
                     return JSONResponse(content=translated)
 
@@ -421,6 +435,13 @@ async def messages_endpoint(request: Request) -> Any:
             last_error = exc
             tried_models.append(mapped_model)
             stats.error_count += 1
+            attempt_history.append({
+                "model": mapped_model,
+                "error_type": "NimQueueTimeoutError",
+                "error_message": str(exc),
+                "status_code": 429,
+                "failure_reason": "NVIDIA NIM Queue Timeout (>30s)",
+            })
             logger.warning(
                 "NVIDIA NIM queue timeout for model '%s': %s. Redirecting request to next fallback model.",
                 mapped_model,
@@ -437,9 +458,9 @@ async def messages_endpoint(request: Request) -> Any:
 
             err_headers: dict[str, str] = {}
             failure_reason = str(e)
+            status_code = getattr(getattr(e, "response", None), "status_code", 500) if hasattr(e, "response") else 500
             if hasattr(e, "response") and hasattr(e.response, "headers"):
                 err_headers = dict(e.response.headers)
-                status_code = getattr(e.response, "status_code", None)
                 if status_code == 429:
                     failure_reason = "HTTP 429 (Rate Limit Exceeded)"
                     from core.router.rate_limiter import rate_limit_parser
@@ -451,6 +472,15 @@ async def messages_endpoint(request: Request) -> Any:
                     cb = circuit_breaker_registry.get(mapped_model)
                     cb.force_open(reason=failure_reason)
 
+            attempt_history.append({
+                "model": mapped_model,
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "status_code": status_code,
+                "failure_reason": failure_reason,
+                "headers": err_headers,
+            })
+
             await model_selector.record_outcome(mapped_model, success=False, headers=err_headers, reason=failure_reason)
             logger.warning("Model '%s' failed (%s). Retrying next fallback model...", mapped_model, failure_reason)
             continue
@@ -460,11 +490,18 @@ async def messages_endpoint(request: Request) -> Any:
             stats.active_concurrency -= 1
 
     stats.error_count += 1
+    err_details = {
+        "last_error": str(last_error),
+        "last_error_type": type(last_error).__name__ if last_error else "Unknown",
+        "tried_models": tried_models,
+        "attempts": attempt_history,
+    }
     err_content = {
         "type": "error",
         "error": {
             "type": "overloaded_error",
             "message": f"All upstream models are currently unavailable. Tried: {tried_models}. Last error: {last_error}",
+            "details": err_details,
         },
     }
     record_request_log(
@@ -477,6 +514,8 @@ async def messages_endpoint(request: Request) -> Any:
         fallbacks_used=tried_models,
         request_body=body,
         response_body=err_content,
+        error_details=err_details,
+        attempt_history=attempt_history,
     )
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

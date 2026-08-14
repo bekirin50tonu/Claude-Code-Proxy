@@ -457,6 +457,34 @@ async function fetchDevPayloads() {
     }
 }
 
+function switchDevSubTab(tab) {
+    const inspectorEl = document.getElementById('dev-subtab-inspector');
+    const traceEl = document.getElementById('dev-subtab-trace');
+    const btnInspector = document.getElementById('dev-subtab-btn-inspector');
+    const btnTrace = document.getElementById('dev-subtab-btn-trace');
+    if (!inspectorEl || !traceEl) return;
+
+    if (tab === 'trace') {
+        inspectorEl.style.display = 'none';
+        traceEl.style.display = 'block';
+        btnInspector.classList.remove('active');
+        btnInspector.style.borderColor = 'var(--border-subtle)';
+        btnInspector.style.color = 'var(--text-muted)';
+        btnTrace.classList.add('active');
+        btnTrace.style.borderColor = 'rgba(234, 179, 8, 0.4)';
+        btnTrace.style.color = '#fef08a';
+    } else {
+        inspectorEl.style.display = 'block';
+        traceEl.style.display = 'none';
+        btnTrace.classList.remove('active');
+        btnTrace.style.borderColor = 'var(--border-subtle)';
+        btnTrace.style.color = 'var(--text-muted)';
+        btnInspector.classList.add('active');
+        btnInspector.style.borderColor = 'rgba(234, 179, 8, 0.4)';
+        btnInspector.style.color = '#fef08a';
+    }
+}
+
 let isSplitView = true;
 
 async function openJsonModal(reqId) {
@@ -477,6 +505,26 @@ async function openJsonModal(reqId) {
 
         document.getElementById('modal-meta-info').innerText = `${payload.method} ${payload.path} | Status: ${payload.status_code} | Latency: ${payload.duration_ms} ms | 📥 In: ${inT} | 📤 Out: ${outT} (Total: ${totalT} tok)`;
 
+        const errBox = document.getElementById('modal-error-trace-container');
+        const errContent = document.getElementById('modal-error-trace-content');
+        if (errBox && errContent) {
+            if (payload.error_details || (payload.attempt_history && payload.attempt_history.length > 0)) {
+                errBox.style.display = 'block';
+                let html = '';
+                if (payload.error_details && payload.error_details.last_error) {
+                    html += `<div style="margin-bottom: 6px;"><strong>Last Upstream Exception:</strong> ${payload.error_details.last_error}</div>`;
+                }
+                if (payload.attempt_history && payload.attempt_history.length > 0) {
+                    html += `<div style="font-weight: 700; margin-top: 4px; color: #fca5a5;">Attempted Candidate History:</div>`;
+                    payload.attempt_history.forEach((att, idx) => {
+                        html += `<div style="padding-left: 8px;">├─ #${idx + 1} [${att.model}]: status ${att.status_code || 500} - ${att.failure_reason || att.error_message || 'Failed'}</div>`;
+                    });
+                }
+                errContent.innerHTML = html;
+            } else {
+                errBox.style.display = 'none';
+            }
+        }
 
         renderModalSideBySide();
 
@@ -1168,3 +1216,4 @@ window.selectSuggestion = selectSuggestion;
 window.focusTagInput = focusTagInput;
 window.handleTagInputKeyDown = handleTagInputKeyDown;
 window.handleInputKeyDown = handleInputKeyDown;
+window.switchDevSubTab = switchDevSubTab;

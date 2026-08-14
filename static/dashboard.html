@@ -66,7 +66,7 @@
             <button type="button" class="control-btn" data-pane="pane-mocks" onclick="switchPane('pane-mocks', this)">Mock Engines</button>
             <button type="button" class="control-btn" data-pane="pane-limits" onclick="switchPane('pane-limits', this)">Throttle &amp; Timeouts</button>
             <button type="button" class="control-btn" data-pane="pane-bots" onclick="switchPane('pane-bots', this)">Bot Matrix</button>
-            <button type="button" class="control-btn" data-pane="pane-logs" onclick="switchPane('pane-logs', this)">System Trace Feed</button>
+            <button type="button" class="control-btn" data-pane="pane-dev" onclick="switchPane('pane-dev', this); switchDevSubTab('trace');" style="border-color: rgba(234, 179, 8, 0.4); color: #fef08a;">System Trace Feed</button>
             <button type="button" class="control-btn" data-pane="pane-guide" onclick="switchPane('pane-guide', this)">Setup Guide</button>
             <button type="button" class="control-btn" data-pane="pane-doctor" onclick="switchPane('pane-doctor', this)">Diagnostics</button>
         </div>
@@ -310,38 +310,70 @@
                     </div>
                 </div>
 
-                <!-- PANE: DEV MODE JSON PAYLOAD INSPECTOR -->
+                <!-- PANE: UNIFIED DEV MODE & TRACE FEED WORKSPACE -->
                 <div id="pane-dev" class="panel-pane">
-                    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                         <div>
-                            <h2>Dev Mode — Claude Code JSON Payload Inspector</h2>
-                            <p>Live request &amp; response JSON beautifier for inspectable Anthropic messages endpoint traffic.</p>
-                        </div>
-                        <div style="display: flex; gap: 0.75rem; align-items: center;">
-                            <input type="text" id="dev-search-input" placeholder="🔍 Filter payloads by model, path..." style="padding: 0.4rem 0.75rem; font-size: 0.75rem; background: #050608; border: 1px solid var(--border-subtle); border-radius: 6px; color: white; width: 260px;" oninput="onDevSearchInput(this.value)">
-                            <button type="button" class="btn-alt" onclick="fetchDevPayloads()" style="padding: 0.4rem 1rem; font-size: 0.75rem;">Refresh Feed</button>
+                            <h2>🛠️ Dev Mode — Live Traffic, Payloads &amp; Error Trace Inspector</h2>
+                            <p>Unified developer console for inspecting API calls, error stack traces, fallback history, and raw request/response JSON payloads.</p>
                         </div>
                     </div>
 
-                    <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
-                            <thead>
-                                <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px;">
-                                    <th style="padding: 0.75rem 1rem;">Time</th>
-                                    <th style="padding: 0.75rem 1rem;">Method &amp; Path</th>
-                                    <th style="padding: 0.75rem 1rem;">Client Model</th>
-                                    <th style="padding: 0.75rem 1rem;">Mapped Upstream Target</th>
-                                    <th style="padding: 0.75rem 1rem;">Tokens (In / Out)</th>
-                                    <th style="padding: 0.75rem 1rem;">Latency</th>
-                                    <th style="padding: 0.75rem 1rem;">Status</th>
-                                    <th style="padding: 0.75rem 1rem; text-align: right;">Dev Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="dev-payloads-table-body">
-                                <tr><td colspan="8" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No Claude Code requests captured yet. Send a request to see JSON payloads here.</td></tr>
+                    <!-- Sub-tab Navigation Bar -->
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.75rem; align-items: center; flex-wrap: wrap;">
+                        <button type="button" class="btn-alt active" id="dev-subtab-btn-inspector" onclick="switchDevSubTab('inspector')" style="padding: 0.5rem 1.1rem; font-size: 0.75rem; border-color: rgba(234, 179, 8, 0.4); color: #fef08a;">🔍 JSON Payload Inspector</button>
+                        <button type="button" class="btn-alt" id="dev-subtab-btn-trace" onclick="switchDevSubTab('trace')" style="padding: 0.5rem 1.1rem; font-size: 0.75rem;">📜 Live System Trace Feed</button>
+                        <a href="/api/dev/raw-logs" target="_blank" class="btn-alt" style="padding: 0.5rem 1.1rem; font-size: 0.75rem; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; margin-left: auto;">📁 Download Raw Log File (.jsonl)</a>
+                    </div>
 
-                            </tbody>
-                        </table>
+                    <!-- Sub-tab 1: JSON Payload Inspector -->
+                    <div id="dev-subtab-inspector">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <input type="text" id="dev-search-input" placeholder="🔍 Filter payloads by model, status, path..." style="padding: 0.5rem 0.85rem; font-size: 0.75rem; background: #050608; border: 1px solid var(--border-subtle); border-radius: 6px; color: white; width: 320px;" oninput="onDevSearchInput(this.value)">
+                            <button type="button" class="btn-alt" onclick="fetchDevPayloads()" style="padding: 0.4rem 1rem; font-size: 0.75rem;">Refresh Feed</button>
+                        </div>
+                        <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+                                <thead>
+                                    <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px;">
+                                        <th style="padding: 0.75rem 1rem;">Time</th>
+                                        <th style="padding: 0.75rem 1rem;">Method &amp; Path</th>
+                                        <th style="padding: 0.75rem 1rem;">Client Model</th>
+                                        <th style="padding: 0.75rem 1rem;">Mapped Upstream Target</th>
+                                        <th style="padding: 0.75rem 1rem;">Tokens (In / Out)</th>
+                                        <th style="padding: 0.75rem 1rem;">Latency</th>
+                                        <th style="padding: 0.75rem 1rem;">Status</th>
+                                        <th style="padding: 0.75rem 1rem; text-align: right;">Dev Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dev-payloads-table-body">
+                                    <tr><td colspan="8" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No Claude Code requests captured yet. Send a request to see JSON payloads here.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Sub-tab 2: Live Request Trace Feed -->
+                    <div id="dev-subtab-trace" style="display: none;">
+                        <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
+                            <table class="feed-table" style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+                                <thead>
+                                    <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px;">
+                                        <th style="padding: 0.75rem 1rem;">Time</th>
+                                        <th style="padding: 0.75rem 1rem;">Call Path</th>
+                                        <th style="padding: 0.75rem 1rem;">Client Model</th>
+                                        <th style="padding: 0.75rem 1rem;">Resolved Upstream Target</th>
+                                        <th style="padding: 0.75rem 1rem;">Latency</th>
+                                        <th style="padding: 0.75rem 1rem;">Status &amp; Error Trace</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="live-request-feed-body">
+                                    <tr>
+                                        <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 20px;">No operational traffic logged. Awaiting API events...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
@@ -627,32 +659,7 @@
                     </div>
                 </div>
 
-                <!-- PANE 7: SYSTEM TRACE FEED -->
-                <div id="pane-logs" class="panel-pane">
-                    <div class="panel-header">
-                        <h2>System Request Trace Feed</h2>
-                        <p>Real-time rolling ledger tracing API calls, mapped execution models, error indicators, and response latencies.</p>
-                    </div>
-                    <div class="feed-container">
-                        <table class="feed-table">
-                            <thead>
-                                <tr>
-                                    <th>Time</th>
-                                    <th>Call Path</th>
-                                    <th>Client Model</th>
-                                    <th>Resolved Upstream</th>
-                                    <th>Latency</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="live-request-feed-body">
-                                <tr>
-                                    <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 20px;">No operational traffic logged. Awaiting API events...</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
+
 
                 <!-- PANE 8: DIAGNOSTICS -->
                 <div id="pane-doctor" class="panel-pane">
@@ -778,6 +785,13 @@ end</code></pre>
             </div>
 
             <div class="modal-body" style="padding: 1.25rem 1.75rem; overflow-y: auto; flex: 1;">
+                <!-- Error Trace & Fallback History Box -->
+                <div id="modal-error-trace-container" style="display: none; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 1rem; margin-bottom: 1.25rem;">
+                    <div style="color: #f87171; font-weight: 700; font-size: 0.8rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 6px;">
+                        <span>🚨 Upstream Model Failure Trace &amp; Fallback History</span>
+                    </div>
+                    <div id="modal-error-trace-content" style="font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #fca5a5; line-height: 1.6;"></div>
+                </div>
                 <div id="modal-body-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
                     <!-- Left Column: Request Payload -->
                     <div style="display: flex; flex-direction: column; gap: 0.5rem;">

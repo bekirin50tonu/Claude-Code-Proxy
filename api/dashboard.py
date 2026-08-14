@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from loguru import logger
 from pydantic import BaseModel
 
@@ -598,7 +598,17 @@ async def get_dev_payloads() -> JSONResponse:
 @router.get("/api/dev/payloads/{req_id}")
 async def get_single_dev_payload(req_id: str) -> JSONResponse:
     """Return a single captured request payload by ID."""
-    for item in stats.recent_requests:
-        if item.id == req_id:
-            return JSONResponse(content=item.to_dict(include_payload=True))
-    return JSONResponse(content={"error": "Payload not found"}, status_code=404)
+    recent_dicts = stats.get_recent_dicts(include_payload=True)
+    for p in recent_dicts:
+        if p.get("id") == req_id:
+            return JSONResponse(content=p)
+    return JSONResponse(content={"error": "Not found"}, status_code=404)
+
+
+@router.get("/api/dev/raw-logs")
+async def get_raw_dev_logs() -> Response:
+    """Return raw persisted .development/requests.jsonl log contents."""
+    log_file = Path(__file__).parent.parent / ".development" / "requests.jsonl"
+    if not log_file.exists():
+        return Response(content="", media_type="text/plain")
+    return Response(content=log_file.read_text(encoding="utf-8"), media_type="text/plain")

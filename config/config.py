@@ -422,6 +422,9 @@ class Settings:
 
 
 
+_LOG_FILE_PATH = Path(__file__).parent.parent / ".development" / "requests.jsonl"
+
+
 class ProxyStats:
     def __init__(self) -> None:
         self.total_requests: int = 0
@@ -430,6 +433,35 @@ class ProxyStats:
         self.active_concurrency: int = 0
         self.recent_requests: list[RequestLogEntry] = []
         self._request_counter: int = 0
+        self._load_from_disk()
+
+    def _load_from_disk(self) -> None:
+        """Load persisted transaction records from disk on startup."""
+        if not _LOG_FILE_PATH.exists():
+            return
+        try:
+            with open(_LOG_FILE_PATH, encoding="utf-8") as f:
+                for line in f:
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        data = json.loads(stripped)
+                        entry = RequestLogEntry.from_dict(data)
+                        self.recent_requests.insert(0, entry)
+                        self.total_requests += 1
+                        if entry.mocked:
+                            self.mocked_requests += 1
+                        if entry.is_error:
+                            self.error_count += 1
+                        self._request_counter += 1
+                    except Exception as parse_err:
+                        logger.debug("Failed to parse log line: %s", parse_err)
+            # Keep up to 100 recent entries in memory
+            if len(self.recent_requests) > 100:
+                self.recent_requests = self.recent_requests[:100]
+        except Exception as e:
+            logger.warning("Failed to load request logs from disk: %s", e)
 
     def record_log(
         self,
@@ -444,6 +476,8 @@ class ProxyStats:
         request_body: dict[str, Any] | None = None,
         response_body: dict[str, Any] | str | None = None,
         headers: dict[str, str] | None = None,
+        error_details: dict[str, Any] | None = None,
+        attempt_history: list[dict[str, Any]] | None = None,
     ) -> None:
         self._request_counter += 1
         duration_ms = round((time.time() - start_time) * 1000, 2)
@@ -489,15 +523,25 @@ class ProxyStats:
             headers=headers or {},
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            error_details=error_details,
+            attempt_history=attempt_history or [],
         )
         self.recent_requests.insert(0, entry)
-        # Keep last 50 requests
-        if len(self.recent_requests) > 50:
+        # Keep last 100 in memory
+        if len(self.recent_requests) > 100:
             self.recent_requests.pop()
 
+        # Append to persistent disk log file
+        try:
+            _LOG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with open(_LOG_FILE_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry.to_dict(include_payload=True)) + "\n")
+        except Exception as write_err:
+            logger.warning("Failed to persist request log to disk: %s", write_err)
 
     def get_recent_dicts(self, include_payload: bool = True) -> list[dict[str, Any]]:
         return [entry.to_dict(include_payload=include_payload) for entry in self.recent_requests]
+
 
 
 settings = Settings()

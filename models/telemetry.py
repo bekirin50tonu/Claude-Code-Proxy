@@ -28,6 +28,8 @@ class RequestLogEntry:
     headers: dict[str, str] = field(default_factory=dict)
     input_tokens: int = 0
     output_tokens: int = 0
+    error_details: dict[str, Any] | None = None
+    attempt_history: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def is_success(self) -> bool:
@@ -53,12 +55,38 @@ class RequestLogEntry:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.input_tokens + self.output_tokens,
+            "error_details": self.error_details,
+            "attempt_history": self.attempt_history,
         }
         if include_payload:
             data["request_body"] = self.request_body
             data["response_body"] = self.response_body
             data["headers"] = self.headers
         return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RequestLogEntry":
+        """Deserialize transaction record from dictionary format."""
+        return cls(
+            id=data.get("id", ""),
+            timestamp=data.get("timestamp", ""),
+            method=data.get("method", "POST"),
+            path=data.get("path", "/v1/messages"),
+            client_model=data.get("client_model", "unknown"),
+            mapped_model=data.get("mapped_model", "unknown"),
+            status_code=int(data.get("status_code", 200)),
+            duration_ms=float(data.get("duration_ms", 0.0)),
+            mocked=bool(data.get("mocked", False)),
+            fallbacks_used=data.get("fallbacks_used") or [],
+            request_body=data.get("request_body"),
+            response_body=data.get("response_body"),
+            headers=data.get("headers") or {},
+            input_tokens=int(data.get("input_tokens", 0)),
+            output_tokens=int(data.get("output_tokens", 0)),
+            error_details=data.get("error_details"),
+            attempt_history=data.get("attempt_history") or [],
+        )
+
 
 
 
