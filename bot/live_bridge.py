@@ -7,6 +7,7 @@ from typing import Any
 from loguru import logger
 
 from bot.formatters import escape_markdown_v2
+from config import settings
 
 
 class SessionLiveStreamState:
@@ -60,9 +61,18 @@ class LiveBridgeManager:
             self._session_states[session_id] = SessionLiveStreamState(session_id)
         return self._session_states[session_id]
 
+    def get_watchers(self) -> set[str]:
+        """Return the current set of active Telegram watcher Chat IDs."""
+        watchers = set(self.active_watchers)
+        allowed = settings.ALLOWED_TELEGRAM_USER_ID.strip()
+        if allowed and (watchers or self.is_watcher(allowed)):
+            watchers.add(allowed)
+        return watchers
+
     async def dispatch_thinking_chunk(self, session_id: str | None, chunk: str) -> None:
         """Accumulate reasoning text and send throttled edits to active watchers."""
-        if not chunk or not self.active_watchers:
+        watchers = self.get_watchers()
+        if not chunk or not watchers:
             return
 
         sid = session_id or "default_session"
@@ -122,7 +132,8 @@ class LiveBridgeManager:
         tool_input: dict[str, Any],
     ) -> None:
         """Notify live watchers when a tool call (file edit, command execution) is intercepted."""
-        if not self.active_watchers:
+        watchers = self.get_watchers()
+        if not watchers:
             return
 
         from bot.factory import bot_factory
@@ -147,7 +158,7 @@ class LiveBridgeManager:
 
         msg_text = "\n".join(details_lines)
 
-        for cid in list(self.active_watchers):
+        for cid in list(watchers):
             try:
                 await app.bot.send_message(
                     chat_id=cid,
@@ -164,7 +175,8 @@ class LiveBridgeManager:
         diff_content: str,
     ) -> None:
         """Send a Markdown diff report to live watchers."""
-        if not self.active_watchers or not diff_content:
+        watchers = self.get_watchers()
+        if not watchers or not diff_content:
             return
 
         from bot.factory import bot_factory
