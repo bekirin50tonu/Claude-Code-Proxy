@@ -59,14 +59,13 @@
         <div class="control-sidebar">
             <button type="button" class="control-btn active" data-pane="pane-models" onclick="switchPane('pane-models', this)">Model Matrix</button>
             <button type="button" class="control-btn" data-pane="pane-router" onclick="switchPane('pane-router', this)">Router &amp; Fallbacks</button>
-            <button type="button" class="control-btn" data-pane="pane-dev" onclick="switchPane('pane-dev', this)" style="border-color: rgba(234, 179, 8, 0.4); color: #fef08a;">Dev Mode (JSON Inspector)</button>
+            <button type="button" class="control-btn" data-pane="pane-dev" onclick="switchPane('pane-dev', this)" style="border-color: rgba(234, 179, 8, 0.4); color: #fef08a;">Dev Mode</button>
             <button type="button" class="control-btn" data-pane="pane-keys" onclick="switchPane('pane-keys', this)">API Credentials</button>
             <button type="button" class="control-btn" data-pane="pane-endpoints" onclick="switchPane('pane-endpoints', this)">Local Endpoints</button>
             <button type="button" class="control-btn" data-pane="pane-tunnels" onclick="switchPane('pane-tunnels', this)">Proxy Tunnels &amp; Base URLs</button>
             <button type="button" class="control-btn" data-pane="pane-mocks" onclick="switchPane('pane-mocks', this)">Mock Engines</button>
             <button type="button" class="control-btn" data-pane="pane-limits" onclick="switchPane('pane-limits', this)">Throttle &amp; Timeouts</button>
             <button type="button" class="control-btn" data-pane="pane-bots" onclick="switchPane('pane-bots', this)">Bot Matrix</button>
-            <button type="button" class="control-btn" data-pane="pane-dev" onclick="switchPane('pane-dev', this); switchDevSubTab('trace');" style="border-color: rgba(234, 179, 8, 0.4); color: #fef08a;">System Trace Feed</button>
             <button type="button" class="control-btn" data-pane="pane-guide" onclick="switchPane('pane-guide', this)">Setup Guide</button>
             <button type="button" class="control-btn" data-pane="pane-doctor" onclick="switchPane('pane-doctor', this)">Diagnostics</button>
         </div>
@@ -314,7 +313,7 @@
                 <div id="pane-dev" class="panel-pane">
                     <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                         <div>
-                            <h2>🛠️ Dev Mode — Live Traffic, Payloads &amp; Error Trace Inspector</h2>
+                            <h2>🛠️ Dev Mode</h2>
                             <p>Unified developer console for inspecting API calls, error stack traces, fallback history, and raw request/response JSON payloads.</p>
                         </div>
                     </div>
