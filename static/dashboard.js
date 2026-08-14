@@ -806,6 +806,13 @@ function handleAutocomplete(inputId) {
     }
 }
 
+function blurAutocomplete(inputId) {
+    setTimeout(() => {
+        const dropdownEl = document.getElementById(inputId + '-dropdown');
+        if (dropdownEl) dropdownEl.style.display = 'none';
+    }, 200);
+}
+
 // Tag State Management
 const tagState = {
     FALLBACK_ORDER_CLAUDE_DEFAULT: [],
@@ -1155,3 +1162,9 @@ window.copyAllModalJson = copyAllModalJson;
 window.onDevSearchInput = onDevSearchInput;
 window.toggleMask = toggleMask;
 window.applySelectedPreset = applySelectedPreset;
+window.handleAutocomplete = handleAutocomplete;
+window.blurAutocomplete = blurAutocomplete;
+window.selectSuggestion = selectSuggestion;
+window.focusTagInput = focusTagInput;
+window.handleTagInputKeyDown = handleTagInputKeyDown;
+window.handleInputKeyDown = handleInputKeyDown;

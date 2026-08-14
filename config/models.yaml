@@ -55,7 +55,7 @@ claude_sonnet:
 claude_sonnet_1m:
   display_name: 4. Sonnet 5 (1M context - Llama 3.3 70B)
   description: Sonnet 5 for long sessions with 1M context
-  primary: nvidia_nim/z-ai/glm-5.2
+  primary: open_ro
   fallback_order:
   - open_router/meta-llama/llama-3.3-70b-instruct
   - open_router/google/gemini-2.5-flash

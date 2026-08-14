@@ -139,35 +139,35 @@
                             <div class="label-row">
                                 <label for="MODEL">1. Default (recommended) — Opus 5 / Nemotron 70B</label>
                             </div>
-                            <input type="text" id="MODEL" autocomplete="off" onfocus="handleAutocomplete('MODEL')" onblur="blurAutocomplete('MODEL')">
+                            <input type="text" id="MODEL" autocomplete="off" onfocus="handleAutocomplete('MODEL')" onblur="blurAutocomplete('MODEL')" oninput="handleAutocomplete('MODEL')" onkeydown="handleInputKeyDown(event, 'MODEL')">
                             <div id="MODEL-dropdown" class="autocomplete-dropdown"></div>
                         </div>
                         <div class="form-group">
                             <div class="label-row">
                                 <label for="MODEL_OPUS">2. Opus (1M context) — Nemotron 70B / Llama 3.3</label>
                             </div>
-                            <input type="text" id="MODEL_OPUS" autocomplete="off" onfocus="handleAutocomplete('MODEL_OPUS')" onblur="blurAutocomplete('MODEL_OPUS')">
+                            <input type="text" id="MODEL_OPUS" autocomplete="off" onfocus="handleAutocomplete('MODEL_OPUS')" onblur="blurAutocomplete('MODEL_OPUS')" oninput="handleAutocomplete('MODEL_OPUS')" onkeydown="handleInputKeyDown(event, 'MODEL_OPUS')">
                             <div id="MODEL_OPUS-dropdown" class="autocomplete-dropdown"></div>
                         </div>
                         <div class="form-group">
                             <div class="label-row">
                                 <label for="MODEL_SONNET">3. Sonnet — Llama 3.1 70B</label>
                             </div>
-                            <input type="text" id="MODEL_SONNET" autocomplete="off" onfocus="handleAutocomplete('MODEL_SONNET')" onblur="blurAutocomplete('MODEL_SONNET')">
+                            <input type="text" id="MODEL_SONNET" autocomplete="off" onfocus="handleAutocomplete('MODEL_SONNET')" onblur="blurAutocomplete('MODEL_SONNET')" oninput="handleAutocomplete('MODEL_SONNET')" onkeydown="handleInputKeyDown(event, 'MODEL_SONNET')">
                             <div id="MODEL_SONNET-dropdown" class="autocomplete-dropdown"></div>
                         </div>
                         <div class="form-group">
                             <div class="label-row">
                                 <label for="MODEL_SONNET_1M">4. Sonnet 5 (1M context) — Llama 3.3 70B</label>
                             </div>
-                            <input type="text" id="MODEL_SONNET_1M" autocomplete="off" onfocus="handleAutocomplete('MODEL_SONNET_1M')" onblur="blurAutocomplete('MODEL_SONNET_1M')">
+                            <input type="text" id="MODEL_SONNET_1M" autocomplete="off" onfocus="handleAutocomplete('MODEL_SONNET_1M')" onblur="blurAutocomplete('MODEL_SONNET_1M')" oninput="handleAutocomplete('MODEL_SONNET_1M')" onkeydown="handleInputKeyDown(event, 'MODEL_SONNET_1M')">
                             <div id="MODEL_SONNET_1M-dropdown" class="autocomplete-dropdown"></div>
                         </div>
                         <div class="form-group full-width">
                             <div class="label-row">
                                 <label for="MODEL_HAIKU">5. Haiku — Fastest 8B / Flash</label>
                             </div>
-                            <input type="text" id="MODEL_HAIKU" autocomplete="off" onfocus="handleAutocomplete('MODEL_HAIKU')" onblur="blurAutocomplete('MODEL_HAIKU')">
+                            <input type="text" id="MODEL_HAIKU" autocomplete="off" onfocus="handleAutocomplete('MODEL_HAIKU')" onblur="blurAutocomplete('MODEL_HAIKU')" oninput="handleAutocomplete('MODEL_HAIKU')" onkeydown="handleInputKeyDown(event, 'MODEL_HAIKU')">
                             <div id="MODEL_HAIKU-dropdown" class="autocomplete-dropdown"></div>
                         </div>
                         <div class="form-group full-width" style="grid-column: span 2; margin-top: 1rem; border-top: 1px dashed var(--border-subtle); padding-top: 1rem;">
