@@ -1,3 +1,3 @@
-from api.routes import router
+from core.gateway import router
 
 __all__ = ["router"]

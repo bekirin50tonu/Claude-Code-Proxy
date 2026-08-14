@@ -1,14 +1,12 @@
 import json
-import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
+from loguru import logger
 
 from config import settings
 from providers.base import BaseProvider
-
-logger = logging.getLogger("proxy.providers.openai")
 
 _key_counters: dict[str, int] = {}
 

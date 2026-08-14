@@ -1,16 +1,18 @@
 claude_opus:
-  primary: nvidia_nim/meta/llama-3.3-70b-instruct
+  primary: nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct
   fallback_order:
-  - open_router/google/gemini-2.5-flash:free
-  - open_router/meta-llama/llama-3.3-70b-instruct:free
   - nvidia_nim/meta/llama-3.1-70b-instruct
-  - nvidia_nim/meta/llama-3.1-8b-instruct
+  - open_router/meta-llama/llama-3.3-70b-instruct
+  - open_router/google/gemini-2.5-flash
+  - open_router/deepseek/deepseek-chat
   metadata:
-    context: 131072
+    context: 1000000
     max_output: 32768
     rpm_limit: 15
     tpm_limit: 200000
     tags:
+    - opus-5
+    - 1m-context
     - reasoning
     - agentic
     - tool-calling
@@ -18,44 +20,49 @@ claude_opus:
 claude_sonnet:
   primary: nvidia_nim/meta/llama-3.1-70b-instruct
   fallback_order:
-  - open_router/google/gemini-2.5-flash:free
-  - open_router/meta-llama/llama-3.3-70b-instruct:free
-  - nvidia_nim/meta/llama-3.3-70b-instruct
+  - open_router/meta-llama/llama-3.3-70b-instruct
+  - open_router/google/gemini-2.5-flash
+  - open_router/arcee-ai/trinity-large-preview:free
   - nvidia_nim/meta/llama-3.1-8b-instruct
   metadata:
-    context: 128000
+    context: 1000000
     max_output: 16384
     rpm_limit: 15
     tpm_limit: 200000
     tags:
+    - sonnet-5
+    - 1m-context
     - coding
     - tool-calling
     - agentic
 claude_haiku:
   primary: nvidia_nim/meta/llama-3.1-8b-instruct
   fallback_order:
-  - open_router/google/gemini-2.5-flash:free
-  - open_router/meta-llama/llama-3-8b-instruct:free
+  - open_router/stepfun/step-3.5-flash:free
+  - open_router/google/gemini-2.5-flash
   - nvidia_nim/meta/llama-3.1-70b-instruct
   metadata:
-    context: 32768
+    context: 200000
     max_output: 8192
     rpm_limit: 20
     tpm_limit: 100000
     tags:
+    - haiku-4.5
     - fast
     - coding
 claude_default:
-  primary: nvidia_nim/meta/llama-3.1-70b-instruct
+  primary: nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct
   fallback_order:
-  - open_router/google/gemini-2.5-flash:free
-  - open_router/meta-llama/llama-3.3-70b-instruct:free
-  - nvidia_nim/meta/llama-3.1-8b-instruct
+  - nvidia_nim/meta/llama-3.1-70b-instruct
+  - open_router/meta-llama/llama-3.3-70b-instruct
+  - open_router/google/gemini-2.5-flash
   metadata:
-    context: 128000
-    max_output: 16384
+    context: 1000000
+    max_output: 32768
     rpm_limit: 15
     tpm_limit: 200000
     tags:
+    - opus-5
+    - default
     - coding
     - tool-calling

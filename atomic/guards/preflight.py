@@ -1,27 +1,14 @@
-"""
-Preflight Probe — lightweight pre-request availability check.
-
-Sends a minimal request (max_tokens=1) to the upstream model with a 3-second
-connect+read timeout. Records the result in the circuit breaker registry.
-
-Returns True if the model responds with a 2xx or 4xx (model is reachable;
-4xx means auth/quota error which is still "alive").
-Returns False if the model is unreachable (connection error, timeout, 5xx).
-"""
-
-import logging
+"""Preflight Probe — lightweight pre-request availability check in Atomic layer."""
 
 import httpx
+from loguru import logger
 
 from config import settings
-from router.circuit_breaker import circuit_breaker_registry
-
-logger = logging.getLogger("proxy.preflight")
+from core.router.circuit_breaker import circuit_breaker_registry
 
 # Timeout for the probe (connect + read combined)
 PROBE_TIMEOUT = httpx.Timeout(connect=3.0, read=5.0, write=3.0, pool=3.0)
 
-# Minimal payload — we only want to check reachability, not get a real response
 _PROBE_MESSAGES = [{"role": "user", "content": "ping"}]
 _PROBE_MAX_TOKENS = 1
 
@@ -31,7 +18,6 @@ def _resolve_url_and_headers(model_id: str) -> tuple[str, dict[str, str]] | None
     extra: dict[str, str] = {"Content-Type": "application/json"}
 
     if "/" not in model_id:
-        # Bare model name — treat as LM Studio local
         url = f"{settings.LM_STUDIO_BASE_URL.rstrip('/')}/chat/completions"
         return url, extra
 
@@ -96,11 +82,7 @@ def _extract_model_name(model_id: str) -> str:
 
 
 async def preflight_model_probe(model_id: str) -> bool:
-    """Probe model_id with a minimal request. Updates circuit breaker state.
-
-    Returns True if the model endpoint is reachable and authenticates.
-    Returns False on auth errors (401/403), network failures, or 5xx server errors.
-    """
+    """Probe model_id with a minimal request. Updates circuit breaker state."""
     resolved = _resolve_url_and_headers(model_id)
     if resolved is None:
         logger.warning("Preflight: cannot resolve endpoint for '%s'", model_id)
@@ -128,14 +110,8 @@ async def preflight_model_probe(model_id: str) -> bool:
         await cb.record_failure()
         return False
 
-    except (
-        httpx.TimeoutException,
-        httpx.ConnectError,
-        httpx.RemoteProtocolError,
-    ) as exc:
-        logger.warning(
-            "Preflight FAIL: '%s' → %s: %s", model_id, type(exc).__name__, exc
-        )
+    except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:
+        logger.warning("Preflight FAIL: '%s' → %s: %s", model_id, type(exc).__name__, exc)
         await cb.record_failure()
         return False
     except Exception as exc:

@@ -1,21 +1,17 @@
-import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from loguru import logger
 
 from api.dashboard import router as dashboard_router
-from api.routes import router as api_router
+from core.gateway import router as api_router
 from messaging.discord_bot import init_discord_bot
 from messaging.manager import messaging_manager
 from messaging.telegram_bot import init_telegram_bot
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger("proxy_server")
 
 
 @asynccontextmanager
@@ -47,6 +43,11 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Register static files directory
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # Register endpoints
 app.include_router(api_router)

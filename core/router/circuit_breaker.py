@@ -1,33 +1,14 @@
-"""
-Circuit Breaker — per-model fault isolation.
-
-States
-------
-CLOSED   : Normal operation. Requests pass through.
-OPEN     : Too many failures. Requests are rejected immediately.
-HALF_OPEN: Recovery probe state. One request is let through;
-           success → CLOSED, failure → OPEN again.
-
-Transitions
------------
-CLOSED  + failure_threshold consecutive failures  → OPEN
-OPEN    + recovery_timeout seconds elapsed        → HALF_OPEN
-HALF_OPEN + success                               → CLOSED
-HALF_OPEN + failure                               → OPEN (reset timer)
-"""
+"""Circuit Breaker — state machine fault isolation in Core layer."""
 
 import asyncio
 import time
-from enum import StrEnum
 
-
-class CircuitState(StrEnum):
-    CLOSED = "closed"
-    OPEN = "open"
-    HALF_OPEN = "half_open"
+from models import CircuitState
 
 
 class CircuitBreaker:
+    """Model-based CLOSED -> OPEN -> HALF_OPEN state machine."""
+
     def __init__(
         self,
         model_id: str,
@@ -41,27 +22,31 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self._opened_at: float | None = None
+        self._opened_at_wall: str | None = None
+        self._reopens_at_wall: str | None = None
+        self._last_failure_reason: str = ""
         self._lock = asyncio.Lock()
 
     @property
     def state(self) -> CircuitState:
         return self._state
 
-    def force_open(self) -> None:
-        """Force circuit breaker into OPEN state."""
+    def force_open(self, reason: str = "Upstream error / EOL / Not Found") -> None:
+        """Force circuit breaker into OPEN state with given failure reason."""
         self._state = CircuitState.OPEN
         self._opened_at = time.monotonic()
+        self._opened_at_wall = time.strftime("%H:%M:%S")
+        self._reopens_at_wall = time.strftime(
+            "%H:%M:%S", time.localtime(time.time() + self.recovery_timeout)
+        )
+        self._last_failure_reason = reason
 
     def is_open(self) -> bool:
         """Return True when requests should be blocked (OPEN state)."""
         if self._state == CircuitState.OPEN:
-            # Check if recovery timeout has elapsed → transition to HALF_OPEN
-            if (
-                self._opened_at
-                and (time.monotonic() - self._opened_at) >= self.recovery_timeout
-            ):
+            if self._opened_at and (time.monotonic() - self._opened_at) >= self.recovery_timeout:
                 self._state = CircuitState.HALF_OPEN
-                return False  # Allow one probe request through
+                return False
             return True
         return False
 
@@ -69,18 +54,23 @@ class CircuitBreaker:
         async with self._lock:
             self._failure_count = 0
             self._opened_at = None
+            self._opened_at_wall = None
+            self._reopens_at_wall = None
+            self._last_failure_reason = ""
             self._state = CircuitState.CLOSED
 
-    async def record_failure(self) -> None:
+    async def record_failure(self, reason: str = "Upstream execution failure") -> None:
         async with self._lock:
             self._failure_count += 1
-            if (
-                self._state == CircuitState.HALF_OPEN
-                or self._failure_count >= self.failure_threshold
-            ):
+            self._last_failure_reason = reason
+            if self._state == CircuitState.HALF_OPEN or self._failure_count >= self.failure_threshold:
                 self._state = CircuitState.OPEN
                 self._opened_at = time.monotonic()
-                self._failure_count = 0  # Reset for next cycle
+                self._opened_at_wall = time.strftime("%H:%M:%S")
+                self._reopens_at_wall = time.strftime(
+                    "%H:%M:%S", time.localtime(time.time() + self.recovery_timeout)
+                )
+                self._failure_count = 0
 
     def status_dict(self) -> dict[str, object]:
         elapsed = (time.monotonic() - self._opened_at) if self._opened_at else None
@@ -90,14 +80,15 @@ class CircuitBreaker:
         return {
             "state": self._state.value,
             "failure_count": self._failure_count,
-            "recovery_remaining_s": round(remaining, 1)
-            if remaining is not None
-            else None,
+            "opened_at_wall": self._opened_at_wall,
+            "reopens_at_wall": self._reopens_at_wall,
+            "recovery_remaining_s": round(remaining, 1) if remaining is not None else None,
+            "last_failure_reason": self._last_failure_reason or "None",
         }
 
 
 class CircuitBreakerRegistry:
-    """Singleton registry — one CircuitBreaker per model_id."""
+    """Registry maintaining a CircuitBreaker per model_id."""
 
     def __init__(self) -> None:
         self._breakers: dict[str, CircuitBreaker] = {}
@@ -111,5 +102,4 @@ class CircuitBreakerRegistry:
         return {mid: cb.status_dict() for mid, cb in self._breakers.items()}
 
 
-# Module-level singleton
 circuit_breaker_registry = CircuitBreakerRegistry()

@@ -9,6 +9,8 @@ import yaml
 from dotenv import load_dotenv
 from loguru import logger
 
+from models.telemetry import RequestLogEntry
+
 # Configure Loguru logger default format and stdout sink
 logger.remove()
 logger.add(
@@ -211,14 +213,14 @@ class Settings:
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
     # Model Mappings (format: provider_type/model/name)
-    MODEL_OPUS: str = os.getenv("MODEL_OPUS", "nvidia_nim/z-ai/glm4.7")
+    MODEL_OPUS: str = os.getenv("MODEL_OPUS", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
     MODEL_SONNET: str = os.getenv(
-        "MODEL_SONNET", "open_router/arcee-ai/trinity-large-preview:free"
+        "MODEL_SONNET", "nvidia_nim/meta/llama-3.1-70b-instruct"
     )
     MODEL_HAIKU: str = os.getenv(
-        "MODEL_HAIKU", "open_router/stepfun/step-3.5-flash:free"
+        "MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct"
     )
-    MODEL: str = os.getenv("MODEL", "nvidia_nim/z-ai/glm4.7")
+    MODEL: str = os.getenv("MODEL", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
 
     # Provider rate limits and performance controls
     PROVIDER_RATE_LIMIT: int = get_int("PROVIDER_RATE_LIMIT", 40)
@@ -326,14 +328,14 @@ class Settings:
         )
         self.OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-        self.MODEL_OPUS = os.getenv("MODEL_OPUS", "nvidia_nim/z-ai/glm4.7")
+        self.MODEL_OPUS = os.getenv("MODEL_OPUS", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
         self.MODEL_SONNET = os.getenv(
-            "MODEL_SONNET", "open_router/arcee-ai/trinity-large-preview:free"
+            "MODEL_SONNET", "nvidia_nim/meta/llama-3.1-70b-instruct"
         )
         self.MODEL_HAIKU = os.getenv(
-            "MODEL_HAIKU", "open_router/stepfun/step-3.5-flash:free"
+            "MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct"
         )
-        self.MODEL = os.getenv("MODEL", "nvidia_nim/z-ai/glm4.7")
+        self.MODEL = os.getenv("MODEL", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
 
         self.PROVIDER_RATE_LIMIT = get_int("PROVIDER_RATE_LIMIT", 40)
         self.PROVIDER_RATE_WINDOW = get_int("PROVIDER_RATE_WINDOW", 60)
@@ -384,7 +386,8 @@ class ProxyStats:
         self.mocked_requests: int = 0
         self.error_count: int = 0
         self.active_concurrency: int = 0
-        self.recent_requests: list[dict[str, Any]] = []
+        self.recent_requests: list[RequestLogEntry] = []
+        self._request_counter: int = 0
 
     def record_log(
         self,
@@ -396,23 +399,34 @@ class ProxyStats:
         start_time: float,
         mocked: bool = False,
         fallbacks_used: list[str] | None = None,
+        request_body: dict[str, Any] | None = None,
+        response_body: dict[str, Any] | str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
+        self._request_counter += 1
         duration_ms = round((time.time() - start_time) * 1000, 2)
-        entry = {
-            "timestamp": time.strftime("%H:%M:%S"),
-            "method": method,
-            "path": path,
-            "client_model": client_model,
-            "mapped_model": mapped_model,
-            "status_code": status_code,
-            "duration_ms": duration_ms,
-            "mocked": mocked,
-            "fallbacks_used": fallbacks_used or [],
-        }
+        entry = RequestLogEntry(
+            id=f"req_{self._request_counter}_{int(time.time())}",
+            timestamp=time.strftime("%H:%M:%S"),
+            method=method,
+            path=path,
+            client_model=client_model,
+            mapped_model=mapped_model,
+            status_code=status_code,
+            duration_ms=duration_ms,
+            mocked=mocked,
+            fallbacks_used=fallbacks_used or [],
+            request_body=request_body,
+            response_body=response_body,
+            headers=headers or {},
+        )
         self.recent_requests.insert(0, entry)
         # Keep last 50 requests
         if len(self.recent_requests) > 50:
             self.recent_requests.pop()
+
+    def get_recent_dicts(self, include_payload: bool = True) -> list[dict[str, Any]]:
+        return [entry.to_dict(include_payload=include_payload) for entry in self.recent_requests]
 
 
 settings = Settings()

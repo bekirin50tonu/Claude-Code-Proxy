@@ -1,10 +1,9 @@
 import asyncio
-import logging
 from typing import Any
 
-from config import settings
+from loguru import logger
 
-logger = logging.getLogger("proxy_messaging")
+from config import settings
 
 
 class MessagingManager:

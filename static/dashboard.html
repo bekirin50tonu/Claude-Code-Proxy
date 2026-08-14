@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hermes Gate - Claude Code Proxy Control Console</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/dashboard.js" defer></script>
+</head>
+<body>
+    <header>
+        <div class="brand">
+            <h1>HERMES GATE <span>//</span> PROXY</h1>
+            <p>Monochrome Client Gateway Terminus</p>
+        </div>
+        <div class="header-links">
+            <a href="/docs" target="_blank" class="header-link">Docs</a>
+        </div>
+    </header>
+
+    <!-- Real-time Telemetry Grid -->
+    <section class="live-dials-grid">
+        <div class="dial-card">
+            <h3>GATEWAY PORT</h3>
+            <div class="dial-val">
+                <span class="status-text">● ONLINE</span>
+                <span>:8090</span>
+            </div>
+            <div class="dial-badge">STANDBY</div>
+        </div>
+        <div class="dial-card">
+            <h3>TRAFFIC VOLUME</h3>
+            <div class="dial-val" id="telemetry-requests">0 <span>reqs</span></div>
+            <div class="dial-badge">ACCUMULATOR</div>
+        </div>
+        <div class="dial-card">
+            <h3>MOCK SAVINGS</h3>
+            <div class="dial-val" id="telemetry-savings">0%</div>
+            <div class="dial-badge" id="telemetry-mock-badge">0 / 0 SAVES</div>
+        </div>
+        <div class="dial-card">
+            <h3>BOT SUBSYSTEMS</h3>
+            <div class="dial-val" style="font-size: 0.95rem; flex-direction: column; gap: 4px; line-height: 1.2; justify-content: center; height: 100%;">
+                <div style="display: flex; justify-content: space-between; width: 100%;">
+                    <span style="color: var(--text-muted); font-size: 0.75rem;">DISCORD:</span>
+                    <span id="telemetry-discord" style="font-weight: 700; font-family: inherit;">...</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; width: 100%;">
+                    <span style="color: var(--text-muted); font-size: 0.75rem;">TELEGRAM:</span>
+                    <span id="telemetry-telegram" style="font-weight: 700; font-family: inherit;">...</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Workspace -->
+    <main>
+        <div class="control-sidebar">
+            <button type="button" class="control-btn active" data-pane="pane-models" onclick="switchPane('pane-models', this)">Model Matrix</button>
+            <button type="button" class="control-btn" data-pane="pane-router" onclick="switchPane('pane-router', this)">Router &amp; Fallbacks</button>
+            <button type="button" class="control-btn" data-pane="pane-dev" onclick="switchPane('pane-dev', this)" style="border-color: rgba(234, 179, 8, 0.4); color: #fef08a;">Dev Mode (JSON Inspector)</button>
+            <button type="button" class="control-btn" data-pane="pane-keys" onclick="switchPane('pane-keys', this)">API Credentials</button>
+            <button type="button" class="control-btn" data-pane="pane-endpoints" onclick="switchPane('pane-endpoints', this)">Local Endpoints</button>
+            <button type="button" class="control-btn" data-pane="pane-tunnels" onclick="switchPane('pane-tunnels', this)">Proxy Tunnels &amp; Base URLs</button>
+            <button type="button" class="control-btn" data-pane="pane-mocks" onclick="switchPane('pane-mocks', this)">Mock Engines</button>
+            <button type="button" class="control-btn" data-pane="pane-limits" onclick="switchPane('pane-limits', this)">Throttle &amp; Timeouts</button>
+            <button type="button" class="control-btn" data-pane="pane-bots" onclick="switchPane('pane-bots', this)">Bot Matrix</button>
+            <button type="button" class="control-btn" data-pane="pane-logs" onclick="switchPane('pane-logs', this)">System Trace Feed</button>
+            <button type="button" class="control-btn" data-pane="pane-guide" onclick="switchPane('pane-guide', this)">Setup Guide</button>
+            <button type="button" class="control-btn" data-pane="pane-doctor" onclick="switchPane('pane-doctor', this)">Diagnostics</button>
+        </div>
+
+        <div class="panel-container">
+            <form id="configForm" onsubmit="saveConfigs(event)">
+                <!-- PANE 1: MODEL MATRIX -->
+                <div id="pane-models" class="panel-pane active">
+                    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h2>Model Matrix Config</h2>
+                            <p>Map Anthropic Client requests to OpenAI-compatible provider endpoints.</p>
+                        </div>
+                        <button type="button" class="btn-alt" onclick="refreshModelsList()" style="padding: 0.5rem 1rem; font-size: 0.75rem;">Refresh Models</button>
+                    </div>
+
+                    <!-- Provider Model Counters Bar -->
+                    <div id="provider-model-counters" style="display: flex; gap: 0.75rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); padding: 0.6rem 1rem; border-radius: 8px; font-size: 0.75rem; display: flex; align-items: center; gap: 8px;">
+                            <span style="color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 0.65rem;">OpenRouter:</span>
+                            <span id="count-open_router" style="font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #ffffff;">...</span>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); padding: 0.6rem 1rem; border-radius: 8px; font-size: 0.75rem; display: flex; align-items: center; gap: 8px;">
+                            <span style="color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 0.65rem;">NVIDIA NIM:</span>
+                            <span id="count-nvidia_nim" style="font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #ffffff;">...</span>
+                        </div>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="MODEL_OPUS">MODEL_OPUS (Opus 5 / 1M Context mapping)</label>
+                            </div>
+                            <input type="text" id="MODEL_OPUS" autocomplete="off" onfocus="handleAutocomplete('MODEL_OPUS')" onblur="blurAutocomplete('MODEL_OPUS')">
+                            <div id="MODEL_OPUS-dropdown" class="autocomplete-dropdown"></div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="MODEL_SONNET">MODEL_SONNET (Sonnet 5 / 1M Context mapping)</label>
+                            </div>
+                            <input type="text" id="MODEL_SONNET" autocomplete="off" onfocus="handleAutocomplete('MODEL_SONNET')" onblur="blurAutocomplete('MODEL_SONNET')">
+                            <div id="MODEL_SONNET-dropdown" class="autocomplete-dropdown"></div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="MODEL_HAIKU">MODEL_HAIKU (Haiku 4.5 mapping)</label>
+                            </div>
+                            <input type="text" id="MODEL_HAIKU" autocomplete="off" onfocus="handleAutocomplete('MODEL_HAIKU')" onblur="blurAutocomplete('MODEL_HAIKU')">
+                            <div id="MODEL_HAIKU-dropdown" class="autocomplete-dropdown"></div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="MODEL">MODEL (Global default / Opus 5 fallback)</label>
+                            </div>
+                            <input type="text" id="MODEL" autocomplete="off" onfocus="handleAutocomplete('MODEL')" onblur="blurAutocomplete('MODEL')">
+                            <div id="MODEL-dropdown" class="autocomplete-dropdown"></div>
+                        </div>
+                        <div class="form-group full-width" style="grid-column: span 2; margin-top: 1rem; border-top: 1px dashed var(--border-subtle); padding-top: 1rem;">
+                            <h3 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">Per-Model Thinking Mode Controls (&lt;think&gt; Directive States)</h3>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                <div>
+                                    <label for="THINKING_MODE_OPUS" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">OPUS 5 THINKING MODE</label>
+                                    <select id="THINKING_MODE_OPUS" style="width: 100%; margin-top: 4px;">
+                                        <option value="open">open — Force &lt;think&gt; Reasoning</option>
+                                        <option value="inherit">inherit — Native Model Behavior</option>
+                                        <option value="close">close — Suppress Thinking</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="THINKING_MODE_SONNET" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">SONNET 5 THINKING MODE</label>
+                                    <select id="THINKING_MODE_SONNET" style="width: 100%; margin-top: 4px;">
+                                        <option value="open">open — Force &lt;think&gt; Reasoning</option>
+                                        <option value="inherit">inherit — Native Model Behavior</option>
+                                        <option value="close">close — Suppress Thinking</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="THINKING_MODE_HAIKU" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">HAIKU 4.5 THINKING MODE</label>
+                                    <select id="THINKING_MODE_HAIKU" style="width: 100%; margin-top: 4px;">
+                                        <option value="open">open — Force &lt;think&gt; Reasoning</option>
+                                        <option value="inherit">inherit — Native Model Behavior</option>
+                                        <option value="close">close — Suppress Thinking</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="THINKING_MODE_DEFAULT" style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted);">DEFAULT THINKING MODE</label>
+                                    <select id="THINKING_MODE_DEFAULT" style="width: 100%; margin-top: 4px;">
+                                        <option value="open">open — Force &lt;think&gt; Reasoning</option>
+                                        <option value="inherit">inherit — Native Model Behavior</option>
+                                        <option value="close">close — Suppress Thinking</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fallback Chains Config -->
+                    <div style="margin-top: 2rem; border-top: 1px solid var(--border-subtle); padding-top: 1.5rem;">
+                        <h3 style="font-size: 0.95rem; font-weight: 700; color: white; margin-bottom: 0.25rem;">Fallback Order Chains</h3>
+                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 1.25rem;">Configure failover model priority list (inline tag chips with autocomplete) used when primary models are unavailable or rate-limited. Press Enter or comma to add a tag.</p>
+                        <div class="form-grid">
+                            <div class="form-group full-width">
+                                <label for="FALLBACK_ORDER_CLAUDE_OPUS">Opus 5 Fallback Order</label>
+                                <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_OPUS" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_OPUS')">
+                                    <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_OPUS" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_OPUS')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_OPUS')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_OPUS')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_OPUS')">
+                                </div>
+                                <div id="FALLBACK_ORDER_CLAUDE_OPUS-dropdown" class="autocomplete-dropdown"></div>
+                            </div>
+                            <div class="form-group full-width">
+                                <label for="FALLBACK_ORDER_CLAUDE_SONNET">Sonnet 5 Fallback Order</label>
+                                <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_SONNET" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_SONNET')">
+                                    <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_SONNET" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_SONNET')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_SONNET')">
+                                </div>
+                                <div id="FALLBACK_ORDER_CLAUDE_SONNET-dropdown" class="autocomplete-dropdown"></div>
+                            </div>
+                            <div class="form-group full-width">
+                                <label for="FALLBACK_ORDER_CLAUDE_HAIKU">Haiku 4.5 Fallback Order</label>
+                                <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_HAIKU" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_HAIKU')">
+                                    <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_HAIKU" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_HAIKU')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_HAIKU')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_HAIKU')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_HAIKU')">
+                                </div>
+                                <div id="FALLBACK_ORDER_CLAUDE_HAIKU-dropdown" class="autocomplete-dropdown"></div>
+                            </div>
+                            <div class="form-group full-width">
+                                <label for="FALLBACK_ORDER_CLAUDE_DEFAULT">Default Fallback Order</label>
+                                <div class="tag-input-container" id="tag-container-FALLBACK_ORDER_CLAUDE_DEFAULT" onclick="focusTagInput('FALLBACK_ORDER_CLAUDE_DEFAULT')">
+                                    <input type="text" class="tag-input-field" id="FALLBACK_ORDER_CLAUDE_DEFAULT" placeholder="Type or select model..." autocomplete="off" onfocus="handleAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')" onblur="blurAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')" onkeydown="handleTagInputKeyDown(event, 'FALLBACK_ORDER_CLAUDE_DEFAULT')" oninput="handleAutocomplete('FALLBACK_ORDER_CLAUDE_DEFAULT')">
+                                </div>
+                                <div id="FALLBACK_ORDER_CLAUDE_DEFAULT-dropdown" class="autocomplete-dropdown"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div><!-- /pane-models -->
+
+                <!-- PANE: ROUTER & FALLBACKS -->
+                <div id="pane-router" class="panel-pane">
+                    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h2>Resilient Multi-Model Router &amp; Fallback Tracker</h2>
+                            <p>Real-time client request routing resolution, circuit breaker status, recovery countdowns, and fault reasons.</p>
+                        </div>
+                        <button type="button" class="btn-alt" onclick="fetchRouterStatus()" style="padding: 0.5rem 1rem; font-size: 0.75rem;">Refresh Status</button>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
+                        <div class="dial-card" style="padding: 1rem;">
+                            <h3>TOTAL REGISTERED MODELS</h3>
+                            <div class="dial-val" id="router-total-models" style="font-size: 1.25rem;">-</div>
+                        </div>
+                        <div class="dial-card" style="padding: 1rem;">
+                            <h3>HEALTHY / READY</h3>
+                            <div class="dial-val" id="router-healthy-models" style="font-size: 1.25rem; color: #4ade80;">-</div>
+                        </div>
+                        <div class="dial-card" style="padding: 1rem;">
+                            <h3>CIRCUIT BREAKER OPEN</h3>
+                            <div class="dial-val" id="router-open-circuits" style="font-size: 1.25rem; color: #f87171;">-</div>
+                        </div>
+                    </div>
+
+                    <!-- Client Request Model Mappings & Active Routing Resolution -->
+                    <div style="margin-bottom: 1.5rem;">
+                        <h3 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">Active Client Request Routing Resolution</h3>
+                        <div id="router-client-mappings-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
+                            <div style="background: #050608; border: 1px solid var(--border-subtle); padding: 1rem; border-radius: 8px;">
+                                <div style="color: var(--text-muted); font-size: 0.75rem;">Loading resolution mappings...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Detailed Models Health & Circuit Breaker Table -->
+                    <h3 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">Upstream Model Health &amp; Circuit Breaker Details</h3>
+                    <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+                            <thead>
+                                <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px;">
+                                    <th style="padding: 0.75rem 1rem;">Model Target ID</th>
+                                    <th style="padding: 0.75rem 1rem;">Circuit State &amp; Recovery Timer</th>
+                                    <th style="padding: 0.75rem 1rem;">Last Failure Cause</th>
+                                    <th style="padding: 0.75rem 1rem;">Failures</th>
+                                    <th style="padding: 0.75rem 1rem;">Quota Headroom</th>
+                                    <th style="padding: 0.75rem 1rem;">Remaining Req / Tok</th>
+                                </tr>
+                            </thead>
+                            <tbody id="router-table-body">
+                                <tr><td colspan="6" style="padding: 1rem; text-align: center; color: var(--text-muted);">Loading router health matrix...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- PANE: DEV MODE JSON PAYLOAD INSPECTOR -->
+                <div id="pane-dev" class="panel-pane">
+                    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h2>Dev Mode — Claude Code JSON Payload Inspector</h2>
+                            <p>Live request &amp; response JSON beautifier for inspectable Anthropic messages endpoint traffic.</p>
+                        </div>
+                        <div style="display: flex; gap: 0.75rem; align-items: center;">
+                            <input type="text" id="dev-search-input" placeholder="🔍 Filter payloads by model, path..." style="padding: 0.4rem 0.75rem; font-size: 0.75rem; background: #050608; border: 1px solid var(--border-subtle); border-radius: 6px; color: white; width: 260px;" oninput="onDevSearchInput(this.value)">
+                            <button type="button" class="btn-alt" onclick="fetchDevPayloads()" style="padding: 0.4rem 1rem; font-size: 0.75rem;">Refresh Feed</button>
+                        </div>
+                    </div>
+
+                    <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+                            <thead>
+                                <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1px;">
+                                    <th style="padding: 0.75rem 1rem;">Time</th>
+                                    <th style="padding: 0.75rem 1rem;">Method &amp; Path</th>
+                                    <th style="padding: 0.75rem 1rem;">Client Model</th>
+                                    <th style="padding: 0.75rem 1rem;">Mapped Upstream Target</th>
+                                    <th style="padding: 0.75rem 1rem;">Latency</th>
+                                    <th style="padding: 0.75rem 1rem;">Status</th>
+                                    <th style="padding: 0.75rem 1rem; text-align: right;">Dev Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dev-payloads-table-body">
+                                <tr><td colspan="7" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No Claude Code requests captured yet. Send a request to see JSON payloads here.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- PANE 2: API CREDENTIALS -->
+                <div id="pane-keys" class="panel-pane">
+                    <div class="panel-header">
+                        <h2>API Credentials Matrix</h2>
+                        <p>Configure API keys for commercial cloud models. Sensitive values are masked by default.</p>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group full-width">
+                            <div class="label-row">
+                                <label for="GATEWAY_AUTH_TOKEN">Gateway Auth Token (Enforces local client authentication. Leave empty to disable auth)</label>
+                                <span id="badge-GATEWAY_AUTH_TOKEN" class="badge-status">...</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input type="password" id="GATEWAY_AUTH_TOKEN" placeholder="Optional. If set, ANTHROPIC_AUTH_TOKEN must match this value.">
+                                <button type="button" class="input-icon-btn" onclick="toggleMask('GATEWAY_AUTH_TOKEN')">Show</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="NVIDIA_NIM_API_KEY">NVIDIA NIM API Key</label>
+                                <span id="badge-NVIDIA_NIM_API_KEY" class="badge-status">...</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input type="password" id="NVIDIA_NIM_API_KEY" placeholder="nvapi-...">
+                                <button type="button" class="input-icon-btn" onclick="toggleMask('NVIDIA_NIM_API_KEY')">Show</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="OPENROUTER_API_KEY">OpenRouter API Key</label>
+                                <span id="badge-OPENROUTER_API_KEY" class="badge-status">...</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input type="password" id="OPENROUTER_API_KEY" placeholder="sk-or-v1-...">
+                                <button type="button" class="input-icon-btn" onclick="toggleMask('OPENROUTER_API_KEY')">Show</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="MISTRAL_API_KEY">Mistral / Codestral API Key</label>
+                                <span id="badge-MISTRAL_API_KEY" class="badge-status">...</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input type="password" id="MISTRAL_API_KEY" placeholder="sk-...">
+                                <button type="button" class="input-icon-btn" onclick="toggleMask('MISTRAL_API_KEY')">Show</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="GEMINI_API_KEY">Gemini API Key (Google)</label>
+                                <span id="badge-GEMINI_API_KEY" class="badge-status">...</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input type="password" id="GEMINI_API_KEY" placeholder="AIzaSy...">
+                                <button type="button" class="input-icon-btn" onclick="toggleMask('GEMINI_API_KEY')">Show</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="GROQ_API_KEY">Groq API Key</label>
+                                <span id="badge-GROQ_API_KEY" class="badge-status">...</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input type="password" id="GROQ_API_KEY" placeholder="gsk_...">
+                                <button type="button" class="input-icon-btn" onclick="toggleMask('GROQ_API_KEY')">Show</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="DEEPSEEK_API_KEY">DeepSeek API Key</label>
+                                <span id="badge-DEEPSEEK_API_KEY" class="badge-status">...</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input type="password" id="DEEPSEEK_API_KEY" placeholder="sk-...">
+                                <button type="button" class="input-icon-btn" onclick="toggleMask('DEEPSEEK_API_KEY')">Show</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="CEREBRAS_API_KEY">Cerebras API Key</label>
+                                <span id="badge-CEREBRAS_API_KEY" class="badge-status">...</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input type="password" id="CEREBRAS_API_KEY" placeholder="csk-...">
+                                <button type="button" class="input-icon-btn" onclick="toggleMask('CEREBRAS_API_KEY')">Show</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="FIREWORKS_API_KEY">Fireworks API Key</label>
+                                <span id="badge-FIREWORKS_API_KEY" class="badge-status">...</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input type="password" id="FIREWORKS_API_KEY" placeholder="fw_...">
+                                <button type="button" class="input-icon-btn" onclick="toggleMask('FIREWORKS_API_KEY')">Show</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="KIMI_API_KEY">Kimi API Key</label>
+                                <span id="badge-KIMI_API_KEY" class="badge-status">...</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input type="password" id="KIMI_API_KEY" placeholder="sk-...">
+                                <button type="button" class="input-icon-btn" onclick="toggleMask('KIMI_API_KEY')">Show</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANE 3: LOCAL ENDPOINTS -->
+                <div id="pane-endpoints" class="panel-pane">
+                    <div class="panel-header">
+                        <h2>Local Model Endpoints</h2>
+                        <p>Configure routing addresses for local LLM models running on your machine.</p>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="LM_STUDIO_BASE_URL">LM Studio Base URL</label>
+                                <span id="status-lmstudio" class="badge-status">Checking...</span>
+                            </div>
+                            <input type="text" id="LM_STUDIO_BASE_URL" placeholder="http://localhost:1234/v1">
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="LLAMA_CPP_BASE_URL">llama.cpp Base URL</label>
+                                <span id="status-llama_cpp" class="badge-status">Checking...</span>
+                            </div>
+                            <input type="text" id="LLAMA_CPP_BASE_URL" placeholder="http://localhost:8080/v1">
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
+                                <label for="OLLAMA_BASE_URL">Ollama Base URL</label>
+                                <span id="status-ollama" class="badge-status">Checking...</span>
+                            </div>
+                            <input type="text" id="OLLAMA_BASE_URL" placeholder="http://localhost:11434">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANE 4: MOCK ENGINES -->
+                <div id="pane-mocks" class="panel-pane">
+                    <div class="panel-header">
+                        <h2>Mock Optimization Engines</h2>
+                        <p>Toggle local processing optimizations to speed up Claude Code interactions.</p>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 1rem;">
+                        <div class="setting-switch">
+                            <div class="setting-switch-desc">
+                                <h4>Fast Prefix Detection</h4>
+                                <p>Extract command safety prefix checks locally.</p>
+                            </div>
+                            <input type="checkbox" id="FAST_PREFIX_DETECTION">
+                        </div>
+                        <div class="setting-switch">
+                            <div class="setting-switch-desc">
+                                <h4>Network Probe Mocking</h4>
+                                <p>Immediately respond to system network and quota status diagnostics.</p>
+                            </div>
+                            <input type="checkbox" id="ENABLE_NETWORK_PROBE_MOCK">
+                        </div>
+                        <div class="setting-switch">
+                            <div class="setting-switch-desc">
+                                <h4>Skip Title Generation</h4>
+                                <p>Prevent external requests for generation of workspace thread titles.</p>
+                            </div>
+                            <input type="checkbox" id="ENABLE_TITLE_GENERATION_SKIP">
+                        </div>
+                        <div class="setting-switch">
+                            <div class="setting-switch-desc">
+                                <h4>Skip Suggestion Autocomplete</h4>
+                                <p>Mock auto-completions in suggestion terminal queries locally.</p>
+                            </div>
+                            <input type="checkbox" id="ENABLE_SUGGESTION_MODE_SKIP">
+                        </div>
+                        <div class="setting-switch">
+                            <div class="setting-switch-desc">
+                                <h4>Filepath Extraction Mocking</h4>
+                                <p>Perform filepath lookup extractions with a regex parser engine.</p>
+                            </div>
+                            <input type="checkbox" id="ENABLE_FILEPATH_EXTRACTION_MOCK">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANE 5: THROTTLE & TIMEOUTS -->
+                <div id="pane-limits" class="panel-pane">
+                    <div class="panel-header">
+                        <h2>Throttle &amp; Timeout Settings</h2>
+                        <p>Configure rate limits, concurrency caps, and HTTP socket timeouts. Select a provider preset to populate recommended values, then commit to save.</p>
+                    </div>
+
+                    <!-- Provider Preset Selector -->
+                    <div style="margin-bottom: 1.75rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 1rem 1.25rem;">
+                        <div style="font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 0.75rem;">Provider Defaults</div>
+                        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                            <select id="provider-preset-select" style="flex: 1; min-width: 200px; max-width: 320px;">
+                                <option value="">-- Select provider --</option>
+                                <option value="nvidia_nim">NVIDIA NIM</option>
+                                <option value="openrouter">OpenRouter</option>
+                                <option value="groq">Groq</option>
+                                <option value="deepseek">DeepSeek</option>
+                                <option value="mistral">Mistral</option>
+                                <option value="cerebras">Cerebras</option>
+                            </select>
+                            <button type="button" class="btn-alt" onclick="applySelectedPreset()" style="padding: 0.75rem 1.5rem; font-size: 0.75rem; white-space: nowrap;">Apply Defaults</button>
+                        </div>
+                        <div id="preset-desc" style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.65rem; min-height: 1rem; line-height: 1.5;"></div>
+                    </div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="PROVIDER_RATE_LIMIT">Rate Limit (requests per window)</label>
+                            <input type="number" id="PROVIDER_RATE_LIMIT">
+                        </div>
+                        <div class="form-group">
+                            <label for="PROVIDER_RATE_WINDOW">Rate Window (seconds)</label>
+                            <input type="number" id="PROVIDER_RATE_WINDOW">
+                        </div>
+                        <div class="form-group">
+                            <label for="PROVIDER_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                            <input type="number" id="PROVIDER_MAX_CONCURRENCY">
+                        </div>
+                        <div class="form-group">
+                            <label for="HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                            <input type="number" id="HTTP_READ_TIMEOUT">
+                        </div>
+                        <div class="form-group">
+                            <label for="HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                            <input type="number" id="HTTP_WRITE_TIMEOUT">
+                        </div>
+                        <div class="form-group">
+                            <label for="HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                            <input type="number" id="HTTP_CONNECT_TIMEOUT">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANE 6: BOT MATRIX -->
+                <div id="pane-bots" class="panel-pane">
+                    <div class="panel-header">
+                        <h2>Bot Matrix Administration</h2>
+                        <p>Set token mappings and workspace folders for Telegram/Discord admin endpoints.</p>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="MESSAGING_PLATFORM">Messaging Platform</label>
+                            <select id="MESSAGING_PLATFORM">
+                                <option value="discord">Discord</option>
+                                <option value="telegram">Telegram</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="CLAUDE_WORKSPACE">Workspace Directory</label>
+                            <input type="text" id="CLAUDE_WORKSPACE">
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="TELEGRAM_BOT_TOKEN">Telegram Bot Token</label>
+                            <input type="password" id="TELEGRAM_BOT_TOKEN">
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="ALLOWED_TELEGRAM_USER_ID">Telegram Chat ID / User ID</label>
+                            <input type="text" id="ALLOWED_TELEGRAM_USER_ID">
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="DISCORD_BOT_TOKEN">Discord Bot Token</label>
+                            <input type="password" id="DISCORD_BOT_TOKEN">
+                        </div>
+                        <div class="form-group full-width">
+                            <label for="ALLOWED_DISCORD_CHANNELS">Discord Channel IDs (comma separated)</label>
+                            <input type="text" id="ALLOWED_DISCORD_CHANNELS">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANE 7: SYSTEM TRACE FEED -->
+                <div id="pane-logs" class="panel-pane">
+                    <div class="panel-header">
+                        <h2>System Request Trace Feed</h2>
+                        <p>Real-time rolling ledger tracing API calls, mapped execution models, error indicators, and response latencies.</p>
+                    </div>
+                    <div class="feed-container">
+                        <table class="feed-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Call Path</th>
+                                    <th>Client Model</th>
+                                    <th>Resolved Upstream</th>
+                                    <th>Latency</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="live-request-feed-body">
+                                <tr>
+                                    <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 20px;">No operational traffic logged. Awaiting API events...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- PANE 8: DIAGNOSTICS -->
+                <div id="pane-doctor" class="panel-pane">
+                    <div class="panel-header">
+                        <h2>Diagnostics Console</h2>
+                        <p>Run diagnostic checks and inspect raw connection capabilities.</p>
+                    </div>
+                    <button type="button" class="btn-alt" onclick="runDiagnostics()">Run Diagnostics</button>
+                    <div class="terminal-box" id="terminalConsole">
+                        <div class="terminal-line">> Console ready. Awaiting instructions...</div>
+                    </div>
+                </div>
+
+                <!-- PANE 9: SETUP GUIDE -->
+                <div id="pane-guide" class="panel-pane">
+                    <div class="panel-header">
+                        <h2>Setup Guide & Environment Settings</h2>
+                        <p>Learn how to redirect the Claude Code CLI tool through this local proxy gateway.</p>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 1.5rem; font-size: 0.85rem; line-height: 1.6;">
+                        <div>
+                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">1. Concept</h3>
+                            <p style="color: var(--text-muted);">
+                                By default, Claude Code connects directly to Anthropic's cloud endpoints. We redirect its traffic locally using the <code>ANTHROPIC_BASE_URL</code> environment variable. 
+                                Since Claude Code requires an authentication token to initialize, we provide a dummy token <code>freecc</code> (or your custom Gateway Token) via <code>ANTHROPIC_AUTH_TOKEN</code>.
+                            </p>
+                        </div>
+
+                        <div>
+                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">2. Bash / Zsh Shell Integration</h3>
+                            <p style="color: var(--text-muted); margin-bottom: 0.5rem;">Run this inside your terminal session to connect directly, or add it to your <code>~/.bashrc</code> or <code>~/.zshrc</code> file:</p>
+                            <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;">export ANTHROPIC_BASE_URL="http://127.0.0.1:8090"
+export ANTHROPIC_AUTH_TOKEN="<span class="guide-token-display">freecc</span>"
+claude</code></pre>
+                        </div>
+
+                        <div>
+                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">3. Fish Shell Integration</h3>
+                            <p style="color: var(--text-muted); margin-bottom: 0.5rem;">For Fish shell users, you can define a custom function (e.g., <code>fcc-claude</code>) in your fish configuration (<code>~/.config/fish/functions/fcc-claude.fish</code>):</p>
+                            <pre class="terminal-box" style="min-height: auto; padding: 1rem; margin-top: 0.25rem;"><code style="color: white; font-family: inherit;">function fcc-claude
+    env ANTHROPIC_BASE_URL="http://127.0.0.1:8090" ANTHROPIC_AUTH_TOKEN="<span class="guide-token-display">freecc</span>" claude $argv
+end</code></pre>
+                            <p style="color: var(--text-muted); margin-top: 0.5rem;">Then, simply type <code>fcc-claude</code> in your terminal to launch it with the proxy routing enabled, or use <code>claude</code> to bypass the proxy.</p>
+                        </div>
+
+                        <div style="border-top: 1px solid var(--border-subtle); padding-top: 1rem;">
+                            <h3 style="color: white; font-size: 0.95rem; margin-bottom: 0.5rem;">Security Note — Gateway Auth Token</h3>
+                            <p style="color: var(--text-muted);">
+                                Currently, your Gateway Token state is: <strong id="guide-token-state" style="color: white;">DISABLED</strong>.
+                                <br>
+                                You can configure a custom token inside the <strong>API Credentials</strong> pane. If configured, you must set your <code>ANTHROPIC_AUTH_TOKEN</code> override to match that exact token. If left blank, any dummy string is accepted.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PANE: ADVANCED PROXY TUNNELS & BASE URLS -->
+                <div id="pane-tunnels" class="panel-pane">
+                    <div class="panel-header">
+                        <h2>Advanced Proxy Tunnels & Base URLs</h2>
+                        <p>Configure custom upstream base URLs and proxy endpoint destinations for commercial LLM providers.</p>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="NVIDIA_NIM_BASE_URL">NVIDIA NIM Base URL Proxy</label>
+                            <input type="text" id="NVIDIA_NIM_BASE_URL" placeholder="https://integrate.api.nvidia.com/v1">
+                        </div>
+                        <div class="form-group">
+                            <label for="OPENROUTER_BASE_URL">OpenRouter Base URL Proxy</label>
+                            <input type="text" id="OPENROUTER_BASE_URL" placeholder="https://openrouter.ai/api/v1">
+                        </div>
+                        <div class="form-group">
+                            <label for="MISTRAL_BASE_URL">Mistral / Codestral Base URL Proxy</label>
+                            <input type="text" id="MISTRAL_BASE_URL" placeholder="https://api.mistral.ai/v1">
+                        </div>
+                        <div class="form-group">
+                            <label for="GEMINI_BASE_URL">Gemini Base URL Proxy</label>
+                            <input type="text" id="GEMINI_BASE_URL" placeholder="https://generativelanguage.googleapis.com/v1beta">
+                        </div>
+                        <div class="form-group">
+                            <label for="GROQ_BASE_URL">Groq Base URL Proxy</label>
+                            <input type="text" id="GROQ_BASE_URL" placeholder="https://api.groq.com/openai/v1">
+                        </div>
+                        <div class="form-group">
+                            <label for="DEEPSEEK_BASE_URL">DeepSeek Base URL Proxy</label>
+                            <input type="text" id="DEEPSEEK_BASE_URL" placeholder="https://api.deepseek.com/v1">
+                        </div>
+                        <div class="form-group">
+                            <label for="CEREBRAS_BASE_URL">Cerebras Base URL Proxy</label>
+                            <input type="text" id="CEREBRAS_BASE_URL" placeholder="https://api.cerebras.ai/v1">
+                        </div>
+                        <div class="form-group">
+                            <label for="FIREWORKS_BASE_URL">Fireworks Base URL Proxy</label>
+                            <input type="text" id="FIREWORKS_BASE_URL" placeholder="https://api.fireworks.ai/inference/v1">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="console-buttons-bar" id="actionButtons">
+                    <button type="submit" class="btn-action">Commit Configuration</button>
+                    <button type="button" class="btn-alt" onclick="revertConfigs()">Revert changes</button>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <div class="alert-toast" id="saveToast">Configuration saved</div>
+
+    <!-- Dev Mode JSON Inspector Modal -->
+    <div class="modal-backdrop" id="json-inspector-modal" onclick="closeJsonModal(event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>🔍 Dev Mode — Live Request &amp; Response Payload Inspector</h3>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button type="button" id="btn-toggle-layout" class="btn-alt" style="padding: 0.3rem 0.75rem; font-size: 0.7rem;" onclick="toggleModalLayout()">↔ Split / Single View</button>
+                    <button type="button" class="btn-alt" onclick="closeJsonModalDirect()" style="padding: 0.3rem 0.75rem; font-size: 0.75rem;">✕ Close</button>
+                </div>
+            </div>
+            
+            <div id="modal-meta-bar" style="background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--border-subtle); padding: 0.75rem 1.75rem; font-size: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+                <div><strong id="modal-meta-client">-</strong> ➔ <span id="modal-meta-mapped" style="color: #fef08a;">-</span></div>
+                <div style="font-family: 'JetBrains Mono', monospace;" id="modal-meta-info">-</div>
+            </div>
+
+            <div class="modal-body" style="padding: 1.25rem 1.75rem; overflow-y: auto; flex: 1;">
+                <div id="modal-body-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+                    <!-- Left Column: Request Payload -->
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.75rem; font-weight: 700; color: #93c5fd; letter-spacing: 0.5px;">📤 INCOMING REQUEST (Claude Code CLI)</span>
+                            <button type="button" class="btn-alt" style="padding: 2px 8px; font-size: 0.65rem;" onclick="copyRequestJson()">📋 Copy Request</button>
+                        </div>
+                        <div id="modal-json-request" class="json-beautified">Select a request payload to inspect...</div>
+                    </div>
+
+                    <!-- Right Column: Response Payload -->
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.75rem; font-weight: 700; color: #86efac; letter-spacing: 0.5px;">📥 OUTGOING RESPONSE (Model Output)</span>
+                            <button type="button" class="btn-alt" style="padding: 2px 8px; font-size: 0.65rem;" onclick="copyResponseJson()">📋 Copy Response</button>
+                        </div>
+                        <div id="modal-json-response" class="json-beautified">Select a response payload to inspect...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <span style="font-size: 0.7rem; color: var(--text-muted);" id="modal-json-status">Side-by-Side Dual Inspector — Request &amp; Response Syntax Beautifier</span>
+                <button type="button" class="btn-action" style="padding: 0.5rem 1.25rem; font-size: 0.75rem;" onclick="copyAllModalJson()">📋 Copy Full Transaction JSON</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
