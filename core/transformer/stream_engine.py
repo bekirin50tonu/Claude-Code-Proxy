@@ -286,6 +286,10 @@ class StreamEngine:
             # 1. Native reasoning_content
             reasoning = delta.get("reasoning_content") or ""
             if reasoning:
+                import asyncio
+
+                from bot.live_bridge import live_bridge_manager
+                asyncio.create_task(live_bridge_manager.dispatch_thinking_chunk(self.session.session_id, reasoning))
                 events = await self.thinking_parser.process_chunk(
                     {"choices": [{"delta": {"reasoning_content": reasoning}}]}
                 )

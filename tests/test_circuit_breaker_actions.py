@@ -21,15 +21,24 @@ def test_circuit_breaker_reset_and_trip_or_extend() -> None:
     assert t1 == 60.0
     assert cb.recovery_timeout == 60.0
 
-    # Second trip while OPEN: should extend timeout to 5 min (300s)
+    # Second trip while OPEN: should extend timeout to 2 min (120s)
     t2 = cb.trip_or_extend("Manual trip 2")
     assert cb.state == CircuitState.OPEN
-    assert t2 == 300.0
-    assert cb.recovery_timeout == 300.0
+    assert t2 == 120.0
+    assert cb.recovery_timeout == 120.0
 
-    # Third trip: extends to 10 min (600s)
+    # Third trip: extends to 5 min (300s)
     t3 = cb.trip_or_extend("Manual trip 3")
-    assert t3 == 600.0
+    assert t3 == 300.0
+
+    # Fourth trip: extends to 10 min (600s)
+    t4 = cb.trip_or_extend("Manual trip 4")
+    assert t4 == 600.0
+
+    # 10th trip (max): extends to 1440 min (86400s / 24h / 1 day)
+    for i in range(5, 12):
+        t_max = cb.trip_or_extend(f"Manual trip {i}")
+    assert t_max == 86400.0
 
     # Reset: reverts to CLOSED and forgets timeout
     cb.reset()
@@ -53,14 +62,14 @@ def test_circuit_breaker_api_action_endpoint() -> None:
     assert "forced OPEN" in data["message"]
     assert data["circuit_breaker"]["state"] == "open"
 
-    # Second trip extends timeout to 5 min
+    # Second trip extends timeout to 2 min
     resp2 = client.post(
         "/api/circuit-breaker/action",
         json={"model_id": model_id, "action": "close"},
     )
     assert resp2.status_code == 200
     data2 = resp2.json()
-    assert "5 min" in data2["message"]
+    assert "2 min" in data2["message"]
 
     # 2. Reset circuit breaker via API
     resp3 = client.post(

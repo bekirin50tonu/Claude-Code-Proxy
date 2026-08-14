@@ -423,7 +423,7 @@ async function fetchRouterStatus() {
                 <td style="padding: 0.5rem 1rem; text-align: right; width: 110px;">
                     <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-end;">
                         <button type="button" class="btn-alt" style="padding: 0.25rem 0.6rem; font-size: 0.68rem; border-color: rgba(34, 197, 94, 0.4); color: #4ade80; width: 95px; text-align: center;" onclick="handleCircuitAction('${modelId}', 'reset')" title="Clear Timeout & Open Traffic (Reset to CLOSED)">Open (Reset)</button>
-                        <button type="button" class="btn-alt" style="padding: 0.25rem 0.6rem; font-size: 0.68rem; border-color: rgba(248, 113, 113, 0.4); color: #f87171; width: 95px; text-align: center;" onclick="handleCircuitAction('${modelId}', 'trip')" title="Block Model & Extend Timeout (1m -> 5m -> 10m -> 15m -> 30m)">Close (+1m/5m)</button>
+                        <button type="button" class="btn-alt" style="padding: 0.25rem 0.6rem; font-size: 0.68rem; border-color: rgba(248, 113, 113, 0.4); color: #f87171; width: 95px; text-align: center;" onclick="handleCircuitAction('${modelId}', 'trip')" title="Block Model & Extend Timeout (1m -> 2m -> 5m -> 10m -> 30m -> 60m -> 120m -> 240m -> 480m -> 1440m)">Close (+Timeout)</button>
                     </div>
                 </td>
             `;
