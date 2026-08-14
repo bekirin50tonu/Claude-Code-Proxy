@@ -774,7 +774,7 @@ function handleAutocomplete(inputId) {
         const textVal = inputEl.value.toLowerCase();
         const providerPrefix = provider + '/';
         const filtered = list.filter(m => {
-            const full = providerPrefix + m;
+            const full = m.startsWith(providerPrefix) ? m : providerPrefix + m;
             return !textVal || full.toLowerCase().includes(textVal);
         });
 
@@ -786,7 +786,7 @@ function handleAutocomplete(inputId) {
 
             filtered.forEach(m => {
                 count++;
-                const fullStr = providerPrefix + m;
+                const fullStr = m.startsWith(providerPrefix) ? m : providerPrefix + m;
                 const item = document.createElement('div');
                 item.className = 'autocomplete-item';
                 item.innerText = fullStr;
@@ -1000,19 +1000,19 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(pollTelemetry, 3000);
 });
 
-// Provider default preset configs
+// Provider default preset configs (including RPM, TPM, Concurrency, and Timeouts)
 const PROVIDER_PRESETS = {
     nvidia_nim: {
-        label: 'NVIDIA NIM — high-throughput, optimised for long generation timeouts. Rate: 60 req/min, Concurrency: 10, Read: 300s.',
-        PROVIDER_RATE_LIMIT: 60,
+        label: 'NVIDIA NIM — Single-Lane Guard (1 concurrency limit), Rate: 38 req/min (capped buffer), TPM: 200k, Read: 120s.',
+        PROVIDER_RATE_LIMIT: 38,
         PROVIDER_RATE_WINDOW: 60,
-        PROVIDER_MAX_CONCURRENCY: 10,
-        HTTP_READ_TIMEOUT: 300,
-        HTTP_WRITE_TIMEOUT: 30,
+        PROVIDER_MAX_CONCURRENCY: 1,
+        HTTP_READ_TIMEOUT: 120,
+        HTTP_WRITE_TIMEOUT: 15,
         HTTP_CONNECT_TIMEOUT: 5,
     },
     openrouter: {
-        label: 'OpenRouter — balanced defaults for free-tier cloud routing. Rate: 40 req/min, Concurrency: 5, Read: 180s.',
+        label: 'OpenRouter — Balanced multi-model cloud aggregator. Rate: 40 req/min, TPM: 500k, Concurrency: 5, Read: 180s.',
         PROVIDER_RATE_LIMIT: 40,
         PROVIDER_RATE_WINDOW: 60,
         PROVIDER_MAX_CONCURRENCY: 5,
@@ -1020,8 +1020,17 @@ const PROVIDER_PRESETS = {
         HTTP_WRITE_TIMEOUT: 20,
         HTTP_CONNECT_TIMEOUT: 5,
     },
+    gemini: {
+        label: 'Google Gemini — OpenAI compatible endpoint (v1beta). Rate: 30 req/min (Free) / 360 (Paid), TPM: 1,000k, Concurrency: 5, Read: 120s.',
+        PROVIDER_RATE_LIMIT: 30,
+        PROVIDER_RATE_WINDOW: 60,
+        PROVIDER_MAX_CONCURRENCY: 5,
+        HTTP_READ_TIMEOUT: 120,
+        HTTP_WRITE_TIMEOUT: 15,
+        HTTP_CONNECT_TIMEOUT: 5,
+    },
     groq: {
-        label: 'Groq — ultra-fast inference, conservative rate limits. Rate: 30 req/min, Concurrency: 4, Read: 60s.',
+        label: 'Groq — Ultra-fast LPU inference, strict rate caps. Rate: 30 req/min, TPM: 14k, Concurrency: 4, Read: 60s.',
         PROVIDER_RATE_LIMIT: 30,
         PROVIDER_RATE_WINDOW: 60,
         PROVIDER_MAX_CONCURRENCY: 4,
@@ -1030,7 +1039,7 @@ const PROVIDER_PRESETS = {
         HTTP_CONNECT_TIMEOUT: 5,
     },
     deepseek: {
-        label: 'DeepSeek — moderate throughput with generous timeouts. Rate: 50 req/min, Concurrency: 6, Read: 180s.',
+        label: 'DeepSeek — High context reasoning & coding. Rate: 50 req/min, TPM: 100k, Concurrency: 6, Read: 180s.',
         PROVIDER_RATE_LIMIT: 50,
         PROVIDER_RATE_WINDOW: 60,
         PROVIDER_MAX_CONCURRENCY: 6,
@@ -1039,7 +1048,7 @@ const PROVIDER_PRESETS = {
         HTTP_CONNECT_TIMEOUT: 5,
     },
     mistral: {
-        label: 'Mistral — standard cloud inference defaults. Rate: 40 req/min, Concurrency: 5, Read: 120s.',
+        label: 'Mistral / Codestral — Enterprise coding models. Rate: 40 req/min, TPM: 100k, Concurrency: 5, Read: 120s.',
         PROVIDER_RATE_LIMIT: 40,
         PROVIDER_RATE_WINDOW: 60,
         PROVIDER_MAX_CONCURRENCY: 5,
@@ -1048,12 +1057,57 @@ const PROVIDER_PRESETS = {
         HTTP_CONNECT_TIMEOUT: 5,
     },
     cerebras: {
-        label: 'Cerebras — wafer-scale fast inference. Rate: 60 req/min, Concurrency: 8, Read: 60s.',
+        label: 'Cerebras — Wafer-scale fast inference. Rate: 60 req/min, TPM: 60k, Concurrency: 8, Read: 60s.',
         PROVIDER_RATE_LIMIT: 60,
         PROVIDER_RATE_WINDOW: 60,
         PROVIDER_MAX_CONCURRENCY: 8,
         HTTP_READ_TIMEOUT: 60,
         HTTP_WRITE_TIMEOUT: 10,
+        HTTP_CONNECT_TIMEOUT: 5,
+    },
+    fireworks: {
+        label: 'Fireworks AI — Fast open-weights inference. Rate: 60 req/min, TPM: 200k, Concurrency: 8, Read: 120s.',
+        PROVIDER_RATE_LIMIT: 60,
+        PROVIDER_RATE_WINDOW: 60,
+        PROVIDER_MAX_CONCURRENCY: 8,
+        HTTP_READ_TIMEOUT: 120,
+        HTTP_WRITE_TIMEOUT: 15,
+        HTTP_CONNECT_TIMEOUT: 5,
+    },
+    kimi: {
+        label: 'Kimi (Moonshot AI) — Long-context Chinese & English models. Rate: 20 req/min, TPM: 100k, Concurrency: 3, Read: 120s.',
+        PROVIDER_RATE_LIMIT: 20,
+        PROVIDER_RATE_WINDOW: 60,
+        PROVIDER_MAX_CONCURRENCY: 3,
+        HTTP_READ_TIMEOUT: 120,
+        HTTP_WRITE_TIMEOUT: 15,
+        HTTP_CONNECT_TIMEOUT: 5,
+    },
+    lmstudio: {
+        label: 'LM Studio — Local desktop server. Rate: 100 req/min (Local), Concurrency: 2, Read: 300s.',
+        PROVIDER_RATE_LIMIT: 100,
+        PROVIDER_RATE_WINDOW: 60,
+        PROVIDER_MAX_CONCURRENCY: 2,
+        HTTP_READ_TIMEOUT: 300,
+        HTTP_WRITE_TIMEOUT: 30,
+        HTTP_CONNECT_TIMEOUT: 5,
+    },
+    ollama: {
+        label: 'Ollama — Local CLI inference runner. Rate: 100 req/min (Local), Concurrency: 2, Read: 300s.',
+        PROVIDER_RATE_LIMIT: 100,
+        PROVIDER_RATE_WINDOW: 60,
+        PROVIDER_MAX_CONCURRENCY: 2,
+        HTTP_READ_TIMEOUT: 300,
+        HTTP_WRITE_TIMEOUT: 30,
+        HTTP_CONNECT_TIMEOUT: 5,
+    },
+    llama_cpp: {
+        label: 'llama.cpp — Local server daemon. Rate: 100 req/min (Local), Concurrency: 1, Read: 300s.',
+        PROVIDER_RATE_LIMIT: 100,
+        PROVIDER_RATE_WINDOW: 60,
+        PROVIDER_MAX_CONCURRENCY: 1,
+        HTTP_READ_TIMEOUT: 300,
+        HTTP_WRITE_TIMEOUT: 30,
         HTTP_CONNECT_TIMEOUT: 5,
     },
 };

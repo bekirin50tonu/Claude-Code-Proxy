@@ -18,24 +18,81 @@ router = APIRouter()
 FALLBACK_MODELS = {
     "nvidia_nim": [
         "nvidia/llama-3.1-nemotron-70b-instruct",
+        "nvidia/nemotron-4-340b-instruct",
         "meta/llama-3.1-405b-instruct",
         "meta/llama-3.1-70b-instruct",
-        "z-ai/glm4.7",
+        "meta/llama-3.1-8b-instruct",
+        "meta/llama-3.3-70b-instruct",
+        "z-ai/glm-5.2",
         "mistralai/mixtral-8x22b-instruct-v0.1",
     ],
     "open_router": [
-        "arcee-ai/trinity-large-preview:free",
         "google/gemini-2.5-flash:free",
-        "meta-llama/llama-3-8b-instruct:free",
+        "google/gemini-2.5-pro",
+        "meta-llama/llama-3.3-70b-instruct",
+        "meta-llama/llama-3.3-70b-instruct:free",
         "deepseek/deepseek-chat",
+        "deepseek/deepseek-r1",
+        "arcee-ai/trinity-large-preview:free",
         "qwen/qwen-2.5-72b-instruct",
         "mistralai/pixtral-12b:free",
+        "stepfun/step-3.5-flash:free",
+    ],
+    "gemini": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+    ],
+    "groq": [
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "mixtral-8x7b-32768",
+        "gemma2-9b-it",
+        "deepseek-r1-distill-llama-70b",
+    ],
+    "deepseek": [
+        "deepseek-chat",
+        "deepseek-coder",
+        "deepseek-reasoner",
+    ],
+    "mistral": [
+        "mistral-large-latest",
+        "mistral-medium-latest",
+        "mistral-small-latest",
+        "codestral-latest",
+        "pixtral-large-latest",
+    ],
+    "cerebras": [
+        "llama3.3-70b",
+        "llama3.1-8b",
+    ],
+    "fireworks": [
+        "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        "accounts/fireworks/models/deepseek-v3",
+        "accounts/fireworks/models/deepseek-r1",
+        "accounts/fireworks/models/qwen2p5-72b-instruct",
+    ],
+    "kimi": [
+        "moonshot-v1-8k",
+        "moonshot-v1-32k",
+        "moonshot-v1-128k",
     ],
     "lmstudio": [
         "qwen2.5-7b-instruct",
         "llama-3.2-3b-instruct",
         "phi-3-mini-4k-instruct",
         "mistral-7b-instruct",
+    ],
+    "ollama": [
+        "llama3.3",
+        "llama3.1:70b",
+        "qwen2.5-coder",
+        "deepseek-r1",
+    ],
+    "llama_cpp": [
+        "local-model",
     ],
 }
 
@@ -199,40 +256,44 @@ async def get_dashboard_ui() -> FileResponse:
 
 @router.get("/api/models")
 async def get_available_models() -> JSONResponse:
-    """Fetch and aggregate models across openrouter and nvidia nim only (LM Studio skipped if offline)."""
-    nim_key = settings.NVIDIA_NIM_API_KEY
-    or_key = settings.OPENROUTER_API_KEY
+    """Fetch and aggregate models across all supported providers dynamically."""
+    providers_config = [
+        ("open_router", f"{settings.OPENROUTER_BASE_URL.rstrip('/')}/models", settings.OPENROUTER_API_KEY),
+        ("nvidia_nim", f"{settings.NVIDIA_NIM_BASE_URL.rstrip('/')}/models", settings.NVIDIA_NIM_API_KEY),
+        ("gemini", f"{settings.GEMINI_BASE_URL.rstrip('/')}/openai/models", settings.GEMINI_API_KEY),
+        ("groq", f"{settings.GROQ_BASE_URL.rstrip('/')}/models", settings.GROQ_API_KEY),
+        ("deepseek", f"{settings.DEEPSEEK_BASE_URL.rstrip('/')}/models", settings.DEEPSEEK_API_KEY),
+        ("mistral", f"{settings.MISTRAL_BASE_URL.rstrip('/')}/models", settings.MISTRAL_API_KEY),
+        ("cerebras", f"{settings.CEREBRAS_BASE_URL.rstrip('/')}/models", settings.CEREBRAS_API_KEY),
+        ("fireworks", f"{settings.FIREWORKS_BASE_URL.rstrip('/')}/models", settings.FIREWORKS_API_KEY),
+        ("kimi", "https://api.moonshot.cn/v1/models", settings.KIMI_API_KEY),
+        ("lmstudio", f"{settings.LM_STUDIO_BASE_URL.rstrip('/')}/models", None),
+        ("ollama", f"{settings.OLLAMA_BASE_URL.rstrip('/')}/v1/models", None),
+        ("llama_cpp", f"{settings.LLAMA_CPP_BASE_URL.rstrip('/')}/models", None),
+    ]
 
     tasks = []
+    keys_order = []
 
-    if or_key:
-        tasks.append(
-            fetch_models_from_url(
-                "https://openrouter.ai/api/v1/models",
-                headers={"Authorization": f"Bearer {or_key}"},
-            )
-        )
-    else:
-        tasks.append(asyncio.to_thread(list))
-
-    if nim_key:
-        tasks.append(
-            fetch_models_from_url(
-                "https://integrate.api.nvidia.com/v1/models",
-                headers={"Authorization": f"Bearer {nim_key}"},
-            )
-        )
-    else:
-        tasks.append(asyncio.to_thread(list))
+    for name, url, api_key in providers_config:
+        keys_order.append(name)
+        if api_key:
+            tasks.append(fetch_models_from_url(url, headers={"Authorization": f"Bearer {api_key}"}))
+        elif api_key is None and url:
+            # Local endpoints (LM Studio, Ollama, Llama.cpp) require no key
+            tasks.append(fetch_models_from_url(url))
+        else:
+            tasks.append(asyncio.to_thread(list))
 
     results = await asyncio.gather(*tasks)
 
-    models = {
-        "open_router": results[0] if results[0] else FALLBACK_MODELS["open_router"],
-        "nvidia_nim": results[1] if results[1] else FALLBACK_MODELS["nvidia_nim"],
-    }
+    models = {}
+    for idx, name in enumerate(keys_order):
+        fetched = results[idx]
+        models[name] = fetched if fetched else FALLBACK_MODELS.get(name, [])
 
     return JSONResponse(content=models)
+
 
 
 @router.get("/api/config")
