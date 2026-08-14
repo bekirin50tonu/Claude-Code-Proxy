@@ -70,6 +70,7 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         commands_info = [
             ("/ask", "Ask AI (Claude Code) a prompt/coding question", "/ask Debug the error in Blog.tsx"),
+            ("/workspace", "View or set active workspace directory for /run", "/workspace /path/to/my_project"),
             ("/status", "View Proxy configuration and Circuit Breaker states", "/status"),
             ("/live on", "Enable real-time reasoning and tool call stream tracking", "/live on"),
             ("/live off", "Disable real-time stream tracking", "/live off"),

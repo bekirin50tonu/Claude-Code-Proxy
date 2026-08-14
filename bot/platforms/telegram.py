@@ -67,6 +67,7 @@ class TelegramBotAdapter(BaseBotAdapter):
             self.app.add_handler(CommandHandler("help", self._cmd_help))
             self.app.add_handler(CommandHandler("status", self._cmd_status))
             self.app.add_handler(CommandHandler("ask", handle_ask_command))
+            self.app.add_handler(CommandHandler("workspace", self._cmd_workspace))
             self.app.add_handler(CommandHandler("reset_circuit", self._cmd_reset_circuit))
             self.app.add_handler(CommandHandler("set_model", self._cmd_set_model))
             self.app.add_handler(CommandHandler("run", self._cmd_run))
@@ -74,6 +75,9 @@ class TelegramBotAdapter(BaseBotAdapter):
             self.app.add_handler(CommandHandler("stop", self._cmd_stop))
             self.app.add_handler(CommandHandler("clear", self._cmd_clear))
             self.app.add_handler(CommandHandler("stats", self._cmd_stats))
+
+            # Direct Text Messages -> AI Prompt Handler
+            self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._cmd_direct_text))
 
             # Inline Query Autocomplete Handler (Hermes Agent Previews)
             self.app.add_handler(InlineQueryHandler(inline_query_handler))
@@ -218,12 +222,14 @@ class TelegramBotAdapter(BaseBotAdapter):
 
         help_text = (
             "🛠️ *Claude Code Proxy Bot Commands*\n\n"
+            "• Direct message \\- Simply type your prompt directly to talk to AI\n"
             "• `/ask <prompt>` \\- Ask AI (Claude Code) a prompt/coding question\n"
+            "• `/workspace <path>` \\- View or set active workspace directory for `/run`\n"
+            "• `/run <command>` \\- Execute bash command in workspace\n"
             "• `/status` \\- View proxy configuration and Circuit Breaker states\n"
             "• `/live <on|off>` \\- Toggle real\\-time reasoning stream and tool call tracking\n"
             "• `/reset_circuit <id|name>` \\- Reset Circuit Breaker for model/provider to `CLOSED`\n"
             "• `/set_model <KEY> <PROVIDER/MODEL>` \\- Update model mapping\n"
-            "• `/run <command>` \\- Execute bash command in workspace\n"
             "• `/stats` \\- View live RPM/TPM token budget & request statistics\n"
             "• `/stop` \\- Cancel active streaming task\n"
             "• `/clear` \\- Clear current session context\n"
@@ -232,6 +238,45 @@ class TelegramBotAdapter(BaseBotAdapter):
         )
         if update.message:
             await update.message.reply_text(text=help_text, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def _cmd_workspace(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not is_authorized_telegram(update):
+            return
+
+        await self._send_typing(update)
+
+        if context.args:
+            new_ws = " ".join(context.args).strip()
+            abs_path = os.path.abspath(new_ws)
+            os.makedirs(abs_path, exist_ok=True)
+            settings.CLAUDE_WORKSPACE = abs_path
+            esc_ws = escape_markdown_v2(abs_path, is_code_block=True)
+            if update.message:
+                await update.message.reply_text(
+                    f"✅ *Workspace Directory Updated\\!*\n\n📂 `{esc_ws}`",
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+        else:
+            curr_ws = os.path.abspath(settings.CLAUDE_WORKSPACE)
+            esc_ws = escape_markdown_v2(curr_ws, is_code_block=True)
+            if update.message:
+                await update.message.reply_text(
+                    f"📂 *Current Workspace Directory:*\n`{esc_ws}`\n\n"
+                    "💡 *Usage:* `/workspace <path_to_project>` to change active execution directory for `/run`\\.",
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+
+    async def _cmd_direct_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle direct text messages without slash prefix by forwarding to handle_ask_command."""
+        if not is_authorized_telegram(update) or not update.message or not update.message.text:
+            return
+
+        text = update.message.text.strip()
+        if text.startswith("/"):
+            return
+
+        context.args = text.split()
+        await handle_ask_command(update, context)
 
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not is_authorized_telegram(update):
