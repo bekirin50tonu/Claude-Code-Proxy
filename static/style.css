@@ -18,25 +18,55 @@
     padding: 0;
 }
 
-body {
+html, body {
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
     background-color: var(--void-bg);
     color: var(--text-main);
     font-family: 'Inter', sans-serif;
-    min-height: 100vh;
     display: flex;
     flex-direction: column;
-    overflow-x: hidden;
+    margin: 0;
+    padding: 0;
+}
+
+/* Custom Sleek Dark Scrollbars */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(6, 7, 9, 0.8);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
+    transition: background 0.2s ease-in-out;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #eab308;
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.18) rgba(6, 7, 9, 0.8);
 }
 
 /* Top Navigation Header */
 header {
     border-bottom: 1px solid var(--border-subtle);
-    padding: 1.25rem 3rem;
+    padding: 1rem 3rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
     background: var(--void-bg);
     z-index: 100;
+    flex-shrink: 0;
 }
 
 .brand h1 {
@@ -88,36 +118,37 @@ header {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 1.25rem;
-    padding: 2rem 3rem 0 3rem;
+    padding: 1.25rem 3rem 0 3rem;
     max-width: 1600px;
     width: 100%;
     margin: 0 auto;
+    flex-shrink: 0;
 }
 
 .dial-card {
     background: var(--carbon-card);
     border: 1px solid var(--border-subtle);
     border-radius: 12px;
-    padding: 1.25rem;
+    padding: 1rem 1.25rem;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    height: 90px;
     position: relative;
 }
 
 .dial-card h3 {
     font-size: 0.65rem;
     font-weight: 700;
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 1px;
-    color: var(--text-dim);
-    margin-bottom: 0.5rem;
 }
 
 .dial-val {
-    font-size: 1.5rem;
+    font-size: 1.35rem;
     font-weight: 800;
-    color: white;
+    color: #ffffff;
     font-family: 'JetBrains Mono', monospace;
     display: flex;
     align-items: baseline;
@@ -125,18 +156,18 @@ header {
 }
 
 .dial-val span {
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     color: var(--text-dim);
-    font-weight: 400;
+    font-weight: 500;
 }
 
 .dial-badge {
     position: absolute;
-    top: 1.25rem;
+    top: 1rem;
     right: 1.25rem;
-    font-size: 0.65rem;
-    font-weight: 800;
-    padding: 2px 8px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 2px 6px;
     border-radius: 4px;
     border: 1px solid var(--border-subtle);
     color: var(--text-muted);
@@ -154,11 +185,13 @@ header {
 main {
     display: flex;
     flex: 1;
-    padding: 2rem 3rem;
-    gap: 2rem;
+    padding: 1.25rem 3rem 1.5rem 3rem;
+    gap: 1.5rem;
     max-width: 1600px;
     margin: 0 auto;
     width: 100%;
+    min-height: 0;
+    overflow: hidden;
 }
 
 /* Left Side Controls Panel */
@@ -169,6 +202,8 @@ main {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    overflow-y: auto;
+    padding-right: 4px;
 }
 
 .control-btn {
@@ -209,9 +244,11 @@ main {
     background: var(--carbon-card);
     border: 1px solid var(--border-subtle);
     border-radius: 12px;
-    padding: 2.5rem;
+    padding: 2rem;
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
+    height: 100%;
 }
 
 #configForm {
@@ -796,3 +833,24 @@ input:disabled {
 .json-number { color: #fde047; }
 .json-boolean { color: #f472b6; font-weight: 700; }
 .json-null { color: #9ca3af; font-style: italic; }
+
+/* Inline Copy Button for Table Cells */
+.btn-copy-icon {
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.2s ease-in-out;
+    outline: none;
+}
+
+.btn-copy-icon:hover {
+    color: #ffffff;
+    border-color: #eab308;
+    background: rgba(234, 179, 8, 0.1);
+}

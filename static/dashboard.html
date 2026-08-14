@@ -625,10 +625,6 @@
 
                     <!-- Provider-Specific Throttle, Timeout & Token Budget Matrix Card Container -->
                     <div style="background: rgba(255, 255, 255, 0.015); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 1.5rem; margin-top: 0.5rem;">
-                        <div style="margin-bottom: 1.25rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 1rem;">
-                            <h3 style="font-size: 0.95rem; font-weight: 700; color: #ffffff; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Per-Provider Budget &amp; Timeout Matrix</h3>
-                            <p style="font-size: 0.75rem; color: var(--text-muted);">Configure RPM, TPM, RPD (Daily Limit), Rate Window, Max Concurrency, Context Window, Max Output, and HTTP Socket Timeouts for each upstream LLM provider individually.</p>
-                        </div>
                         <div style="display: flex; gap: 0.4rem; margin-bottom: 1.25rem; flex-wrap: wrap; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.75rem;">
                             <button type="button" class="btn-alt provider-tab-btn active" id="ptab-btn-nvidia_nim" onclick="switchProviderTab('nvidia_nim')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem; border-color: #eab308; background: rgba(234, 179, 8, 0.15); color: #ffffff; font-weight: 700;">NVIDIA NIM</button>
                             <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-open_router" onclick="switchProviderTab('open_router')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">OpenRouter</button>

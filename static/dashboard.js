@@ -400,16 +400,31 @@ async function fetchRouterStatus() {
 
             const causeText = cb.last_failure_reason || 'None (Operational)';
 
+            const escapedModelId = modelId.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const escapedCause = causeText.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
             tr.innerHTML = `
-                <td style="padding: 0.75rem 1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; word-break: break-all; max-width: 220px;">${modelId}</td>
-                <td style="padding: 0.75rem 1rem; min-width: 150px;"><span style="color: ${stateColor}; font-weight: 700; font-size: 0.7rem;">${stateDisplay}</span></td>
-                <td style="padding: 0.75rem 1rem; color: ${cb.state === 'open' ? '#f87171' : 'var(--text-muted)'}; font-size: 0.72rem; word-break: break-word; max-width: 260px;">${causeText}</td>
+                <td style="padding: 0.75rem 1rem; max-width: 220px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
+                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: #ffffff;" title="${escapedModelId}">${modelId}</span>
+                        <button type="button" class="btn-copy-icon" onclick="copyTextToClipboard('${escapedModelId}', this)" title="Copy full Model Target ID">Copy</button>
+                    </div>
+                </td>
+                <td style="padding: 0.75rem 1rem; min-width: 140px;"><span style="color: ${stateColor}; font-weight: 700; font-size: 0.7rem;">${stateDisplay}</span></td>
+                <td style="padding: 0.75rem 1rem; max-width: 260px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
+                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: ${cb.state === 'open' ? '#f87171' : 'var(--text-muted)'}; font-size: 0.72rem;" title="${escapedCause}">${causeText}</span>
+                        <button type="button" class="btn-copy-icon" onclick="copyTextToClipboard('${escapedCause}', this)" title="Copy full Failure Reason">Copy</button>
+                    </div>
+                </td>
                 <td style="padding: 0.75rem 1rem; color: var(--text-muted); text-align: center;">${cb.failure_count || 0}</td>
                 <td style="padding: 0.75rem 1rem; white-space: nowrap;"><span style="color: ${headroomColor}; font-weight: 700;">${rl.has_headroom ? 'YES (≥10%)' : 'NO (LIMITED)'}</span></td>
                 <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap;">${reqRem} req / ${tokRem} tok</td>
-                <td style="padding: 0.75rem 1rem; text-align: right; white-space: nowrap;">
-                    <button type="button" class="btn-alt" style="padding: 0.35rem 0.65rem; font-size: 0.7rem; border-color: rgba(34, 197, 94, 0.4); color: #4ade80; margin-right: 6px;" onclick="handleCircuitAction('${modelId}', 'reset')" title="Clear Timeout & Open Traffic (Reset to CLOSED)">Open (Reset)</button>
-                    <button type="button" class="btn-alt" style="padding: 0.35rem 0.65rem; font-size: 0.7rem; border-color: rgba(248, 113, 113, 0.4); color: #f87171;" onclick="handleCircuitAction('${modelId}', 'trip')" title="Block Model & Extend Timeout (1m -> 5m -> 10m -> 15m -> 30m)">Close (+1m/5m)</button>
+                <td style="padding: 0.5rem 1rem; text-align: right; width: 110px;">
+                    <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-end;">
+                        <button type="button" class="btn-alt" style="padding: 0.25rem 0.6rem; font-size: 0.68rem; border-color: rgba(34, 197, 94, 0.4); color: #4ade80; width: 95px; text-align: center;" onclick="handleCircuitAction('${modelId}', 'reset')" title="Clear Timeout & Open Traffic (Reset to CLOSED)">Open (Reset)</button>
+                        <button type="button" class="btn-alt" style="padding: 0.25rem 0.6rem; font-size: 0.68rem; border-color: rgba(248, 113, 113, 0.4); color: #f87171; width: 95px; text-align: center;" onclick="handleCircuitAction('${modelId}', 'trip')" title="Block Model & Extend Timeout (1m -> 5m -> 10m -> 15m -> 30m)">Close (+1m/5m)</button>
+                    </div>
                 </td>
             `;
             tbody.appendChild(tr);
@@ -418,6 +433,27 @@ async function fetchRouterStatus() {
         console.error("Failed to fetch router status:", e);
     }
 }
+
+function copyTextToClipboard(text, btnEl) {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        if (btnEl) {
+            const origText = btnEl.innerText;
+            btnEl.innerText = 'Copied!';
+            btnEl.style.borderColor = '#4ade80';
+            btnEl.style.color = '#4ade80';
+            setTimeout(() => {
+                btnEl.innerText = origText;
+                btnEl.style.borderColor = 'var(--border-subtle)';
+                btnEl.style.color = 'var(--text-muted)';
+            }, 1200);
+        }
+        showToast("Copied to clipboard!", "success");
+    }).catch(err => {
+        showToast("Failed to copy", "error");
+    });
+}
+window.copyTextToClipboard = copyTextToClipboard;
 
 async function handleCircuitAction(modelId, action) {
     try {
@@ -548,12 +584,15 @@ class PayloadDataTable {
             const inTok = req.input_tokens || 0;
             const outTok = req.output_tokens || 0;
             const tokBadge = `<span style="font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #60a5fa;">${inTok.toLocaleString()} / ${outTok.toLocaleString()} tok</span>`;
+            const escapedPath = `${req.method} ${req.path}`.replace(/"/g, '&quot;');
+            const escapedClient = (req.client_model || '').replace(/"/g, '&quot;');
+            const escapedMapped = (req.mapped_model || '').replace(/"/g, '&quot;');
 
             tr.innerHTML = `
-                <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap;">${req.timestamp}</td>
-                <td style="padding: 0.75rem 1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; word-break: break-all; max-width: 180px;">${req.method} ${req.path}</td>
-                <td style="padding: 0.75rem 1rem; color: white; word-break: break-all; max-width: 160px;">${req.client_model || '-'}</td>
-                <td style="padding: 0.75rem 1rem; color: #fef08a; font-family: 'JetBrains Mono', monospace; word-break: break-all; max-width: 200px;">${req.mapped_model || '-'}</td>
+                <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap; user-select: text;">${req.timestamp}</td>
+                <td style="padding: 0.75rem 1rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; word-break: break-word; max-width: 180px; user-select: text;" title="${escapedPath}">${req.method} ${req.path}</td>
+                <td style="padding: 0.75rem 1rem; color: white; word-break: break-word; max-width: 160px; user-select: text;" title="${escapedClient}">${req.client_model || '-'}</td>
+                <td style="padding: 0.75rem 1rem; color: #fef08a; font-family: 'JetBrains Mono', monospace; word-break: break-word; max-width: 200px; user-select: text;" title="${escapedMapped}">${req.mapped_model || '-'}</td>
                 <td style="padding: 0.75rem 1rem; white-space: nowrap;">${tokBadge}</td>
                 <td style="padding: 0.75rem 1rem; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; white-space: nowrap;">${req.duration_ms} ms</td>
                 <td style="padding: 0.75rem 1rem; ${statusClass} font-weight: 700; white-space: nowrap;">${req.status_code}</td>
@@ -762,6 +801,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchModels();
     loadConfigs();
     startLiveAutoRefresh();
+    fetchDevPayloads();
 });
 
 async function fetchDevPayloads() {
