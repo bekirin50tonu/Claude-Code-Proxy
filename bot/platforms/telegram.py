@@ -25,6 +25,7 @@ from bot.formatters import (
     format_circuit_breaker_alert_tg,
     format_status_overview_tg,
 )
+from bot.handlers.ask import handle_ask_command
 from bot.handlers.inline import inline_query_handler
 from bot.handlers.voice import handle_voice_message
 from bot.live_bridge import live_bridge_manager
@@ -65,6 +66,7 @@ class TelegramBotAdapter(BaseBotAdapter):
             self.app.add_handler(CommandHandler("start", self._cmd_start))
             self.app.add_handler(CommandHandler("help", self._cmd_help))
             self.app.add_handler(CommandHandler("status", self._cmd_status))
+            self.app.add_handler(CommandHandler("ask", handle_ask_command))
             self.app.add_handler(CommandHandler("reset_circuit", self._cmd_reset_circuit))
             self.app.add_handler(CommandHandler("set_model", self._cmd_set_model))
             self.app.add_handler(CommandHandler("run", self._cmd_run))
@@ -216,6 +218,7 @@ class TelegramBotAdapter(BaseBotAdapter):
 
         help_text = (
             "🛠️ *Claude Code Proxy Bot Commands*\n\n"
+            "• `/ask <prompt>` \\- Ask AI (Claude Code) a prompt/coding question\n"
             "• `/status` \\- View proxy configuration and Circuit Breaker states\n"
             "• `/live <on|off>` \\- Toggle real\\-time reasoning stream and tool call tracking\n"
             "• `/reset_circuit <id|name>` \\- Reset Circuit Breaker for model/provider to `CLOSED`\n"
