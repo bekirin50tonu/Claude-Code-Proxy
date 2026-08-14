@@ -9,6 +9,7 @@ from bot.live_bridge import LiveBridgeManager
 async def test_live_bridge_toggle_watchers() -> None:
     """Test watcher registration and toggling in LiveBridgeManager."""
     manager = LiveBridgeManager()
+    manager.active_watchers.clear()
     chat_id = "123456789"
 
     assert not manager.is_watcher(chat_id)

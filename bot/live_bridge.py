@@ -1,13 +1,19 @@
 """Live Stream Bridge — Real-time reasoning stream interceptor and tool call reporter for Telegram Bot."""
 
 import asyncio
+import os
 import time
 from typing import Any
 
+import yaml
 from loguru import logger
 
 from bot.formatters import escape_markdown_v2
 from config import settings
+
+STATE_FILE = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", ".data", "telegram_state.yaml")
+)
 
 
 class SessionLiveStreamState:
@@ -29,6 +35,40 @@ class LiveBridgeManager:
         self.min_edit_interval: float = min_edit_interval  # Max 2 edits/sec
         self._session_states: dict[str, SessionLiveStreamState] = {}
         self._lock = asyncio.Lock()
+        self.load_state()
+
+    def save_state(self) -> None:
+        """Save active watchers and workspace settings to .data/telegram_state.yaml."""
+        try:
+            os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+            data = {
+                "active_watchers": list(self.active_watchers),
+                "claude_workspace": settings.CLAUDE_WORKSPACE,
+            }
+            with open(STATE_FILE, "w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f, default_flow_style=False)
+        except Exception as e:
+            logger.warning(f"Failed to save live bridge state to {STATE_FILE}: {e}")
+
+    def load_state(self) -> None:
+        """Load active watchers and workspace settings from .data/telegram_state.yaml."""
+        if not os.path.exists(STATE_FILE):
+            return
+        try:
+            with open(STATE_FILE, encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+
+            watchers = data.get("active_watchers") or []
+            self.active_watchers = set(str(w).strip() for w in watchers)
+
+            ws = data.get("claude_workspace")
+            if ws and os.path.exists(ws):
+                settings.CLAUDE_WORKSPACE = ws
+
+            if self.active_watchers:
+                logger.info(f"LiveBridgeManager: Restored active watchers: {self.active_watchers}")
+        except Exception as e:
+            logger.warning(f"Failed to load live bridge state from {STATE_FILE}: {e}")
 
     async def toggle_live(self, chat_id: str, enable: bool | None = None) -> bool:
         """Enable or disable live stream watching for a given Chat ID.
@@ -37,20 +77,24 @@ class LiveBridgeManager:
         """
         async with self._lock:
             cid = str(chat_id).strip()
+            res = False
             if enable is None:
                 if cid in self.active_watchers:
                     self.active_watchers.remove(cid)
-                    return False
+                    res = False
                 else:
                     self.active_watchers.add(cid)
-                    return True
+                    res = True
             else:
                 if enable:
                     self.active_watchers.add(cid)
-                    return True
+                    res = True
                 else:
                     self.active_watchers.discard(cid)
-                    return False
+                    res = False
+
+            self.save_state()
+            return res
 
     def is_watcher(self, chat_id: str) -> bool:
         """Check if chat_id is registered as an active live watcher."""

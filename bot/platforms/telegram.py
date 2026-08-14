@@ -250,6 +250,8 @@ class TelegramBotAdapter(BaseBotAdapter):
             abs_path = os.path.abspath(new_ws)
             os.makedirs(abs_path, exist_ok=True)
             settings.CLAUDE_WORKSPACE = abs_path
+            from bot.live_bridge import live_bridge
+            live_bridge.save_state()
             esc_ws = escape_markdown_v2(abs_path, is_code_block=True)
             if update.message:
                 await update.message.reply_text(

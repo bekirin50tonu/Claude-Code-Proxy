@@ -1,11 +1,11 @@
 """Circuit Breaker — state machine fault isolation in Core layer with persistent storage."""
 
 import asyncio
-import json
 import os
 import time
 from typing import Any
 
+import yaml
 from loguru import logger
 
 from models import CircuitState
@@ -24,7 +24,7 @@ TIMEOUT_STEPS = [
 ]
 
 STORAGE_FILE = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", ".data", "circuit_breakers.json")
+    os.path.join(os.path.dirname(__file__), "..", "..", ".data", "circuit_breakers.yaml")
 )
 
 
@@ -232,7 +232,7 @@ class CircuitBreakerRegistry:
                         "reopens_at_wall": cb._reopens_at_wall,
                     }
             with open(STORAGE_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+                yaml.safe_dump(data, f, default_flow_style=False)
         except Exception as e:
             logger.warning(f"Failed to persist circuit breaker states: {e}")
 
@@ -242,7 +242,7 @@ class CircuitBreakerRegistry:
             return
         try:
             with open(STORAGE_FILE, encoding="utf-8") as f:
-                data = json.load(f)
+                data = yaml.safe_load(f) or {}
 
             now_wall = time.time()
             for mid, rec in data.items():
