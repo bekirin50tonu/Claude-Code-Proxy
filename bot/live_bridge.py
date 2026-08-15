@@ -22,6 +22,7 @@ class SessionLiveStreamState:
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         self.thinking_accumulator: list[str] = []
+        self.text_accumulator: list[str] = []
         self.msg_ids: dict[str, int] = {}  # chat_id -> message_id
         self.last_edit_time: float = 0.0
         self.lock = asyncio.Lock()
@@ -37,6 +38,7 @@ class LiveBridgeManager:
         self.pending_responses: dict[str, str] = {}
         self._lock = asyncio.Lock()
         self.load_state()
+
 
     def save_state(self) -> None:
         """Save active watchers and workspace settings to .data/telegram_state.yaml."""
@@ -199,6 +201,87 @@ class LiveBridgeManager:
                 except Exception as e:
                     if "Message is not modified" not in str(e):
                         logger.debug(f"Live thinking update edit error for chat {cid}: {e}")
+
+    async def dispatch_text_chunk(self, session_id: str | None, chunk: str) -> None:
+        """Accumulate output text and send throttled edits to active watchers."""
+        watchers = self.get_watchers()
+        if not chunk or not watchers:
+            return
+
+        sid = session_id or "default_session"
+        state = self._get_session_state(sid)
+
+        async with state.lock:
+            state.text_accumulator.append(chunk)
+            now = time.monotonic()
+
+            if (now - state.last_edit_time) < self.min_edit_interval:
+                return
+
+            state.last_edit_time = now
+            full_thinking = "".join(state.thinking_accumulator).strip()
+            full_text = "".join(state.text_accumulator).strip()
+            if not full_text:
+                return
+
+            msg_parts = []
+            if full_thinking:
+                trunc_think = full_thinking[:1000] + ("..." if len(full_thinking) > 1000 else "")
+                esc_think = escape_markdown_v2(trunc_think, is_code_block=False)
+                msg_parts.append(f"🧠 *Thinking:*\n_{esc_think}_")
+
+            trunc_ans = full_text[:2500] + ("..." if len(full_text) > 2500 else "")
+            esc_ans = escape_markdown_v2(trunc_ans, is_code_block=False)
+            msg_parts.append(f"💬 *Response:*\n{esc_ans}")
+
+            text = "\n\n".join(msg_parts)
+
+            from bot.factory import bot_factory
+            tg_adapter = bot_factory.get_adapter("telegram")
+            if not tg_adapter or not getattr(tg_adapter, "app", None):
+                return
+
+            app = tg_adapter.app
+            for cid in list(watchers):
+                try:
+                    msg_id = state.msg_ids.get(cid)
+                    if not msg_id:
+                        try:
+                            sent_msg = await app.bot.send_message(
+                                chat_id=cid,
+                                text=text,
+                                parse_mode="MarkdownV2",
+                            )
+                        except Exception:
+                            import re
+                            plain_text = re.sub(r"\\(.)", r"\1", text)
+                            sent_msg = await app.bot.send_message(
+                                chat_id=cid,
+                                text=plain_text,
+                                parse_mode=None,
+                            )
+                        state.msg_ids[cid] = sent_msg.message_id
+                    else:
+                        try:
+                            await app.bot.edit_message_text(
+                                chat_id=cid,
+                                message_id=msg_id,
+                                text=text,
+                                parse_mode="MarkdownV2",
+                            )
+                        except Exception as e:
+                            if "Message is not modified" not in str(e):
+                                import re
+                                plain_text = re.sub(r"\\(.)", r"\1", text)
+                                await app.bot.edit_message_text(
+                                    chat_id=cid,
+                                    message_id=msg_id,
+                                    text=plain_text,
+                                    parse_mode=None,
+                                )
+                except Exception as e:
+                    if "Message is not modified" not in str(e):
+                        logger.debug(f"Live text update edit error for chat {cid}: {e}")
 
     async def dispatch_tool_call(
         self,

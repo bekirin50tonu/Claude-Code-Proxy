@@ -75,6 +75,7 @@ class TelegramBotAdapter(BaseBotAdapter):
             self.app.add_handler(CommandHandler("set_model", self._cmd_set_model))
             self.app.add_handler(CommandHandler("run", self._cmd_run))
             self.app.add_handler(CommandHandler("live", self._cmd_live))
+            self.app.add_handler(CommandHandler("inject", self._cmd_inject))
             self.app.add_handler(CommandHandler("stop", self._cmd_stop))
             self.app.add_handler(CommandHandler("clear", self._cmd_clear))
             self.app.add_handler(CommandHandler("stats", self._cmd_stats))
@@ -339,6 +340,36 @@ class TelegramBotAdapter(BaseBotAdapter):
 
         if update.message:
             await update.message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2)
+
+    async def _cmd_inject(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Enqueue prompt into PromptQueueManager to be injected into active Claude CLI session."""
+        if not is_authorized_telegram(update) or not update.message:
+            return
+
+        await self._send_typing(update)
+
+        if not context.args:
+            if update.message:
+                await update.message.reply_text(
+                    "⚠️ *Usage:* `/inject <prompt text>`\n"
+                    "Enqueues prompt instruction to be injected into the next Claude Code CLI payload.",
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+            return
+
+        prompt = " ".join(context.args).strip()
+        from core.interceptor.prompt_queue import prompt_queue_manager
+        q_size = await prompt_queue_manager.push_prompt(prompt)
+
+        esc_prompt = escape_markdown_v2(prompt, is_code_block=True)
+        reply_text = (
+            "📥 *Prompt Enqueued for Remote Injection\\!*\n\n"
+            f"💬 *Instruction:* `{esc_prompt}`\n"
+            f"📊 *Queue Depth:* `{q_size}` pending prompt\\(s\\)\n\n"
+            "✨ _This instruction will be automatically injected into the next Claude Code CLI session request\\._"
+        )
+        if update.message:
+            await update.message.reply_text(text=reply_text, parse_mode=ParseMode.MARKDOWN_V2)
 
     async def _cmd_stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not is_authorized_telegram(update):

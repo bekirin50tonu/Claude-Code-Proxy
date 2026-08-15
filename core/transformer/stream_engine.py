@@ -396,6 +396,10 @@ class StreamEngine:
                         self.accumulated_text.append(content)
                         if content.strip() or content == " ":
                             self.text_or_tool_emitted = True
+                            import asyncio
+
+                            from bot.live_bridge import live_bridge_manager
+                            asyncio.create_task(live_bridge_manager.dispatch_text_chunk(self.session.session_id, content))
                         yield AnthropicSSEFormatter.text_delta(content, self._get_current_index())
 
         # Flush Thinking Parser
@@ -478,15 +482,16 @@ class StreamEngine:
 
         # --- ASYNCHRONOUS SAFETY NET (PREEMPTIVE / FALLBACK INJECTION) ---
         # If no text content and no tool calls were emitted throughout the entire stream,
-        # inject a single space text_delta so Claude Code CLI never crashes with:
-        # "model output must contain either output text or tool calls, these cannot both be empty"
+        # inject accumulated thinking text as text_delta (or space if no thinking) so Claude Code CLI gets the result!
         if not self.text_or_tool_emitted:
+            full_think_text = "".join(self.accumulated_thinking).strip()
+            fallback_text = full_think_text if full_think_text else " "
             idx = self._next_block_index()
             yield AnthropicSSEFormatter.text_start(idx)
-            yield AnthropicSSEFormatter.text_delta(" ", idx)
+            yield AnthropicSSEFormatter.text_delta(fallback_text, idx)
             yield AnthropicSSEFormatter.block_stop(idx)
             self.text_or_tool_emitted = True
-            self.accumulated_text.append(" ")
+            self.accumulated_text.append(fallback_text)
 
         self.final_stop_reason = stop_reason
         self.final_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
