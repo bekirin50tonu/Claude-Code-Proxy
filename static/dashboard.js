@@ -4,6 +4,16 @@ let lockStatuses = {};
 let liveRefreshTimer = null;
 let currentRefreshIntervalSeconds = 4;
 
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 
 async function fetchModels() {
     try {
@@ -896,6 +906,17 @@ async function fetchDevMetrics() {
         const elConc = document.getElementById('metrics-active-concurrency');
         if (elConc) elConc.innerHTML = `${gm.active_concurrency || 0} <span style="font-size: 0.7rem; color: var(--text-dim);">workers</span>`;
 
+        const el429 = document.getElementById('metrics-global-429');
+        if (el429) {
+            const total429 = gm.global_429_count || 0;
+            const r60 = gm.global_429_60s || 0;
+            if (total429 > 0) {
+                el429.innerHTML = `<span style="color: #f87171;">${total429}</span> <span style="font-size: 0.7rem; color: var(--text-dim);">(last 60s: ${r60})</span>`;
+            } else {
+                el429.innerHTML = `<span style="color: #4ade80;">0</span> <span style="font-size: 0.7rem; color: var(--text-dim);">events</span>`;
+            }
+        }
+
         const elLat = document.getElementById('metrics-avg-latency');
         if (elLat) elLat.innerHTML = `${gm.global_avg_latency_ms || 0} <span style="font-size: 0.7rem; color: var(--text-dim);">ms</span>`;
 
@@ -949,7 +970,7 @@ async function fetchDevMetrics() {
 
         const models = data.model_metrics || [];
         if (models.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No models tracked yet.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No models tracked yet.</td></tr>`;
             return;
         }
 
@@ -964,6 +985,10 @@ async function fetchDevMetrics() {
             const waitStr = (m.estimated_wait_s || 0) > 0
                 ? `<span style="color: #f87171; font-weight: 800; font-family: 'JetBrains Mono', monospace;">⏳ ${m.estimated_wait_s}s wait</span>`
                 : `<span style="color: #4ade80; font-family: 'JetBrains Mono', monospace;">0.0s</span>`;
+
+            const rlBadge = (m.rate_limit_429_count || 0) > 0
+                ? `<span style="color: #f87171; font-weight: 800; font-family: 'JetBrains Mono', monospace;">⚠️ ${m.rate_limit_429_count} hits (${m.rate_limit_429_60s || 0} in 60s)</span>`
+                : `<span style="color: #4ade80; font-family: 'JetBrains Mono', monospace;">0 hits</span>`;
 
             const succColor = m.success_rate >= 90 ? '#4ade80' : (m.success_rate >= 70 ? '#facc15' : '#f87171');
             const rpmBadge = m.rpm_60s > 0
@@ -980,6 +1005,7 @@ async function fetchDevMetrics() {
                 <td style="padding: 0.75rem 1rem; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: white;">${escapeHtml(m.model_id)}</td>
                 <td style="padding: 0.75rem 1rem; text-align: center;">${rpmBadge}</td>
                 <td style="padding: 0.75rem 1rem; text-align: center;">${waitStr}</td>
+                <td style="padding: 0.75rem 1rem; text-align: center;">${rlBadge}</td>
                 <td style="padding: 0.75rem 1rem; text-align: center; font-family: 'JetBrains Mono', monospace;">${m.avg_latency_ms} ms</td>
                 <td style="padding: 0.75rem 1rem; text-align: center; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: ${succColor};">${m.success_rate}%</td>
                 <td style="padding: 0.75rem 1rem;">${cbBadge}</td>

@@ -436,7 +436,7 @@
                     <!-- Sub-tab 3: Metrics -->
                     <div id="dev-subtab-metrics" style="display: none;">
                         <!-- Top Metrics Summary Cards -->
-                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
+                        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-bottom: 1.5rem;">
                             <div class="dial-card" style="padding: 1rem; height: 80px;">
                                 <h3>GLOBAL TRAFFIC (RPM)</h3>
                                 <div class="dial-val" id="metrics-global-rpm" style="font-size: 1.25rem;">0 <span style="font-size: 0.7rem;">req/min</span></div>
@@ -444,6 +444,10 @@
                             <div class="dial-card" style="padding: 1rem; height: 80px;">
                                 <h3>ACTIVE CONCURRENCY</h3>
                                 <div class="dial-val" id="metrics-active-concurrency" style="font-size: 1.25rem;">0 <span style="font-size: 0.7rem;">workers</span></div>
+                            </div>
+                            <div class="dial-card" style="padding: 1rem; height: 80px;">
+                                <h3>RATE LIMIT (429) EVENTS</h3>
+                                <div class="dial-val" id="metrics-global-429" style="font-size: 1.25rem; color: #4ade80;">0 <span style="font-size: 0.7rem; color: var(--text-dim);">events</span></div>
                             </div>
                             <div class="dial-card" style="padding: 1rem; height: 80px;">
                                 <h3>AVG PROXY LATENCY</h3>
@@ -492,6 +496,7 @@
                                         <th style="padding: 0.75rem 1rem;">Model Target ID</th>
                                         <th style="padding: 0.75rem 1rem; text-align: center;">60s Traffic (RPM)</th>
                                         <th style="padding: 0.75rem 1rem; text-align: center;">Est. Queue / Delay</th>
+                                        <th style="padding: 0.75rem 1rem; text-align: center;">Rate Limit (429) Hits</th>
                                         <th style="padding: 0.75rem 1rem; text-align: center;">Avg Latency</th>
                                         <th style="padding: 0.75rem 1rem; text-align: center;">Success Rate</th>
                                         <th style="padding: 0.75rem 1rem;">Circuit &amp; Health State</th>

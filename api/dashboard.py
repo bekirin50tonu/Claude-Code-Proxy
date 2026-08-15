@@ -754,6 +754,8 @@ async def get_dev_metrics() -> JSONResponse:
             "total_requests": 0,
             "success_count": 0,
             "error_count": 0,
+            "rate_limit_429_count": 0,
+            "rate_limit_429_60s": 0,
             "total_latency_ms": 0.0,
             "avg_latency_ms": 0.0,
             "success_rate": 100.0,
@@ -763,6 +765,9 @@ async def get_dev_metrics() -> JSONResponse:
             "req_remaining": None,
             "has_headroom": True,
         }
+
+    global_429_count = 0
+    global_429_60s = 0
 
     for log in recent_logs:
         mid = log.mapped_model
@@ -775,6 +780,8 @@ async def get_dev_metrics() -> JSONResponse:
                 "total_requests": 0,
                 "success_count": 0,
                 "error_count": 0,
+                "rate_limit_429_count": 0,
+                "rate_limit_429_60s": 0,
                 "total_latency_ms": 0.0,
                 "avg_latency_ms": 0.0,
                 "success_rate": 100.0,
@@ -792,11 +799,17 @@ async def get_dev_metrics() -> JSONResponse:
             st["success_count"] += 1
         else:
             st["error_count"] += 1
+            if log.status_code == 429:
+                st["rate_limit_429_count"] += 1
+                global_429_count += 1
 
     for log in logs_last_60s:
         mid = log.mapped_model
         if mid in model_stats:
             model_stats[mid]["rpm_60s"] += 1
+            if log.status_code == 429:
+                model_stats[mid]["rate_limit_429_60s"] += 1
+                global_429_60s += 1
 
     from atomic.guards.nim_guard import nim_throttle_guard
     from core.key_manager import nim_key_manager
@@ -855,6 +868,8 @@ async def get_dev_metrics() -> JSONResponse:
                 "global_rpm": global_rpm,
                 "active_concurrency": stats.active_concurrency,
                 "global_avg_latency_ms": global_avg_latency,
+                "global_429_count": global_429_count,
+                "global_429_60s": global_429_60s,
                 "total_requests": stats.total_requests,
                 "mocked_requests": stats.mocked_requests,
             },
