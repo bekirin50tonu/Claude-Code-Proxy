@@ -1,6 +1,9 @@
 let configSnapshot = {};
 let modelsSnapshot = {};
 let lockStatuses = {};
+let liveRefreshTimer = null;
+let currentRefreshIntervalSeconds = 4;
+
 
 async function fetchModels() {
     try {
@@ -147,18 +150,11 @@ function startLiveAutoRefresh() {
     const ms = currentRefreshIntervalSeconds * 1000;
 
     pollTelemetry();
+    fetchRouterStatus();
 
     liveRefreshTimer = setInterval(() => {
         pollTelemetry();
-        
-        const activePane = document.querySelector('.panel-pane.active');
-        if (activePane) {
-            if (activePane.id === 'pane-router') {
-                fetchRouterStatus();
-            } else if (activePane.id === 'pane-dev') {
-                fetchDevPayloads();
-            }
-        }
+        fetchRouterStatus();
     }, ms);
 }
 
@@ -757,6 +753,8 @@ window.changeInspectorPage = changeInspectorPage;
 window.changeTracePage = changeTracePage;
 window.changeInspectorPageSize = changeInspectorPageSize;
 window.changeTracePageSize = changeTracePageSize;
+window.fetchSubagentEmergencyStatus = fetchSubagentEmergencyStatus;
+window.toggleSubagentEmergencySwitch = toggleSubagentEmergencySwitch;
 
 document.addEventListener('DOMContentLoaded', () => {
     // Restore Saved UI Preferences from localStorage
@@ -800,6 +798,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     fetchModels();
     loadConfigs();
+    fetchSubagentEmergencyStatus();
     startLiveAutoRefresh();
     fetchDevPayloads();
 });
@@ -1088,6 +1087,7 @@ async function pollTelemetry() {
 
         // Automatically refresh Dev Mode payloads on every telemetry poll
         await fetchDevPayloads();
+        await fetchSubagentEmergencyStatus();
 
     } catch (e) {
         console.error("Telemetry polling failed", e);
@@ -1593,5 +1593,51 @@ const PROVIDER_PRESETS = {
         HTTP_CONNECT_TIMEOUT: 5,
     },
 };
+
+
+let subagentsEnabledState = true;
+
+async function fetchSubagentEmergencyStatus() {
+    try {
+        const resp = await fetch('/api/settings/subagents');
+        const data = await resp.json();
+        subagentsEnabledState = !!data.subagents_enabled;
+        updateSubagentUI(subagentsEnabledState);
+    } catch (e) {
+        console.error("Failed to fetch subagents status", e);
+    }
+}
+
+function updateSubagentUI(enabled) {
+    const el = document.getElementById('SUBAGENTS_ENABLED');
+    if (el) {
+        el.checked = !!enabled;
+    }
+}
+
+async function toggleSubagentEmergencySwitch(val) {
+    const nextState = val !== undefined ? !!val : !subagentsEnabledState;
+    try {
+        const resp = await fetch('/api/settings/subagents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: nextState })
+        });
+        const data = await resp.json();
+        if (data.status === 'success') {
+            subagentsEnabledState = data.subagents_enabled;
+            updateSubagentUI(subagentsEnabledState);
+            showToast(data.message, subagentsEnabledState ? 'success' : 'warning');
+        } else {
+            showToast("Failed to update switch: " + data.message, "error");
+            updateSubagentUI(subagentsEnabledState);
+        }
+    } catch (e) {
+        showToast("Error updating Subagent Emergency Switch", "error");
+        updateSubagentUI(subagentsEnabledState);
+    }
+}
+
+
 
 

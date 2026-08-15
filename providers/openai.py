@@ -141,38 +141,93 @@ class OpenAICompatibleProvider(BaseProvider):
             pool=None,
         )
 
-        client = httpx.AsyncClient(timeout=timeout)
+        candidate_keys = []
+        if provider_part_check == "nvidia_nim":
+            from core.key_manager import nim_key_manager
+            candidate_keys = await nim_key_manager.get_active_candidate_keys()
+        if not candidate_keys:
+            candidate_keys = [api_key]
 
-        try:
-            if stream:
-                req = client.build_request(
-                    "POST",
-                    f"{base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                response = await client.send(req, stream=True)
-                if response.status_code >= 400:
-                    error_bytes = await response.aread()
-                    await response.aclose()
-                    error_text = error_bytes.decode("utf-8", errors="replace")
-                    logger.error(
-                        "Upstream Stream HTTP %d Error from %s: %s",
-                        response.status_code,
-                        f"{base_url.rstrip('/')}/chat/completions",
-                        error_text,
-                    )
-                    response.raise_for_status()
-
-                self._last_stream_headers = dict(response.headers)
-                return self._stream_response_generator(client, response)
+        last_exc: Exception | None = None
+        for key_idx, current_key in enumerate(candidate_keys):
+            if current_key:
+                headers["Authorization"] = f"Bearer {current_key}"
             else:
-                return await self._non_stream_request(
-                    client, f"{base_url.rstrip('/')}/chat/completions", headers, payload
-                )
-        except Exception:
-            await client.aclose()
-            raise
+                headers.pop("Authorization", None)
+
+            client = httpx.AsyncClient(timeout=timeout)
+            try:
+                if stream:
+                    req = client.build_request(
+                        "POST",
+                        f"{base_url.rstrip('/')}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
+                    response = await client.send(req, stream=True)
+                    if response.status_code in (429, 401) and provider_part_check == "nvidia_nim" and len(candidate_keys) > 1:
+                        error_bytes = await response.aread()
+                        await response.aclose()
+                        await client.aclose()
+                        from core.key_manager import nim_key_manager
+                        await nim_key_manager.mark_passive(current_key)
+                        logger.warning(
+                            "NVIDIA NIM Stream HTTP %d on key #%d. Silent failover to next key in pool...",
+                            response.status_code,
+                            key_idx + 1,
+                        )
+                        continue
+
+                    if response.status_code >= 400:
+                        error_bytes = await response.aread()
+                        await response.aclose()
+                        error_text = error_bytes.decode("utf-8", errors="replace")
+                        logger.error(
+                            "Upstream Stream HTTP %d Error from %s: %s",
+                            response.status_code,
+                            f"{base_url.rstrip('/')}/chat/completions",
+                            error_text,
+                        )
+                        response.raise_for_status()
+
+                    self._last_stream_headers = dict(response.headers)
+                    return self._stream_response_generator(client, response)
+                else:
+                    try:
+                        res_body, res_headers = await self._non_stream_request(
+                            client, f"{base_url.rstrip('/')}/chat/completions", headers, payload
+                        )
+                        return res_body, res_headers
+                    except httpx.HTTPStatusError as status_err:
+                        if status_err.response.status_code in (429, 401) and provider_part_check == "nvidia_nim" and len(candidate_keys) > 1:
+                            from core.key_manager import nim_key_manager
+                            await nim_key_manager.mark_passive(current_key)
+                            logger.warning(
+                                "NVIDIA NIM Non-Stream HTTP %d on key #%d. Silent failover to next key in pool...",
+                                status_err.response.status_code,
+                                key_idx + 1,
+                            )
+                            continue
+                        raise
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadTimeout) as timeout_err:
+                await client.aclose()
+                last_exc = timeout_err
+                if provider_part_check == "nvidia_nim" and len(candidate_keys) > 1:
+                    from core.key_manager import nim_key_manager
+                    await nim_key_manager.mark_passive(current_key)
+                    logger.warning(
+                        "NVIDIA NIM Network/Timeout (%s) on key #%d. Silent failover to next key in pool...",
+                        type(timeout_err).__name__,
+                        key_idx + 1,
+                    )
+                    continue
+                raise
+            except Exception:
+                await client.aclose()
+                raise
+
+        if last_exc:
+            raise last_exc
 
     async def _stream_response_generator(
         self, client: httpx.AsyncClient, response: httpx.Response

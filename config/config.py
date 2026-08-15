@@ -448,6 +448,7 @@ PROVIDER_DEFAULTS: dict[str, dict[str, int]] = {
 
 class Settings:
     # Upstream API keys and endpoints
+    NVIDIA_NIM_API_KEYS: str = os.getenv("NVIDIA_NIM_API_KEYS", "")
     NVIDIA_NIM_API_KEY: str = os.getenv("NVIDIA_NIM_API_KEY", "")
 
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
@@ -588,6 +589,7 @@ class Settings:
         else:
             load_dotenv(override=True)
 
+        self.NVIDIA_NIM_API_KEYS = os.getenv("NVIDIA_NIM_API_KEYS", "")
         self.NVIDIA_NIM_API_KEY = os.getenv("NVIDIA_NIM_API_KEY", "")
         self.OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
         self.GATEWAY_AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "")

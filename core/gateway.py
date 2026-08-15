@@ -247,10 +247,36 @@ async def messages_endpoint(request: Request) -> Any:
             },
         )
 
+    # Sanitize payload for Subagents Emergency Switch policy (OFF: force run_in_background=False, ON: keep intact)
+    from api.dashboard import SUBAGENTS_ENABLED
+    from atomic.guards.subagent import subagent_guard
+    body = subagent_guard.sanitize_payload(body, SUBAGENTS_ENABLED)
+
     client_model = body.get("model", "unknown")
     stream = body.get("stream", False)
     messages = body.get("messages", [])
     system = body.get("system")
+
+    # Resolve Session ID and check for pending Telegram prompts in queue
+    session_id = request.headers.get("x-session-id") or request.headers.get("x-conversation-id") or "default_session"
+    from core.interceptor.prompt_queue import prompt_queue_manager
+
+    pending_prompts = prompt_queue_manager.pop_all_prompts(session_id)
+    if not pending_prompts and session_id != "default_session":
+        pending_prompts = prompt_queue_manager.pop_all_prompts("default_session")
+
+    if pending_prompts:
+        injection_text = "\n\n".join([f"📌 [Remote User Instruction via Telegram]: {p}" for p in pending_prompts])
+        if messages and isinstance(messages, list):
+            if messages[-1].get("role") == "user":
+                last_content = messages[-1].get("content")
+                if isinstance(last_content, str):
+                    messages[-1]["content"] = last_content + f"\n\n{injection_text}"
+                elif isinstance(last_content, list):
+                    messages[-1]["content"].append({"type": "text", "text": injection_text})
+            else:
+                messages.append({"role": "user", "content": injection_text})
+        logger.info(f"Injected {len(pending_prompts)} Telegram prompt(s) into session '{session_id}' request payload.")
 
     model_thinking_mode = settings.get_thinking_mode(client_model)
     if model_thinking_mode == "open":
