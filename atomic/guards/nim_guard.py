@@ -38,7 +38,13 @@ class NimThrottleGuard:
 
     @property
     def rpm_limit(self) -> int:
-        return self._rpm_limit if self._rpm_limit is not None else settings.NVIDIA_NIM_SAFE_RPM
+        if self._rpm_limit is not None:
+            return self._rpm_limit
+        with contextlib.suppress(Exception):
+            nim_cfg = settings.get_provider_config("nvidia_nim")
+            if nim_cfg and "rpm" in nim_cfg and nim_cfg["rpm"] is not None:
+                return int(nim_cfg["rpm"])
+        return settings.NVIDIA_NIM_SAFE_RPM
 
     @property
     def window_seconds(self) -> float:

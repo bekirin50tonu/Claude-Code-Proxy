@@ -444,6 +444,11 @@ async def save_config(req: ConfigSaveRequest) -> JSONResponse:
         if "NVIDIA_NIM_API_KEY" in filtered_configs:
             filtered_configs["NVIDIA_NIM_API_KEYS"] = filtered_configs["NVIDIA_NIM_API_KEY"]
 
+        if "PROVIDER_NVIDIA_NIM_RPM" in filtered_configs:
+            filtered_configs["NVIDIA_NIM_SAFE_RPM"] = filtered_configs["PROVIDER_NVIDIA_NIM_RPM"]
+        elif "NVIDIA_NIM_SAFE_RPM" in filtered_configs:
+            filtered_configs["PROVIDER_NVIDIA_NIM_RPM"] = filtered_configs["NVIDIA_NIM_SAFE_RPM"]
+
         save_env_values(filtered_configs)
         if fallback_updates:
             model_registry.save_entries(fallback_updates)

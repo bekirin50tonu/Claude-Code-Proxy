@@ -580,6 +580,8 @@ class Settings:
                     res[field_name] = def_val
             else:
                 res[field_name] = get_int(env_key, def_val)
+        if p == "nvidia_nim" and "rpm" in res:
+            res["rpm"] = self.NVIDIA_NIM_SAFE_RPM
         return res
 
     def reload(self) -> None:
@@ -650,7 +652,9 @@ class Settings:
         self.PROVIDER_RATE_WINDOW = get_int("PROVIDER_RATE_WINDOW", 60)
         self.PROVIDER_MAX_CONCURRENCY = get_int("PROVIDER_MAX_CONCURRENCY", 5)
 
-        self.NVIDIA_NIM_SAFE_RPM = get_int("NVIDIA_NIM_SAFE_RPM", 38)
+        nim_rpm = get_int("PROVIDER_NVIDIA_NIM_RPM", get_int("NVIDIA_NIM_SAFE_RPM", 38))
+        self.NVIDIA_NIM_SAFE_RPM = nim_rpm
+        self.PROVIDER_NVIDIA_NIM_RPM = nim_rpm
         self.NVIDIA_NIM_WINDOW_SECONDS = get_int("NVIDIA_NIM_WINDOW_SECONDS", 60)
         self.NVIDIA_NIM_MAX_QUEUE_WAIT = get_int("NVIDIA_NIM_MAX_QUEUE_WAIT", 30)
 

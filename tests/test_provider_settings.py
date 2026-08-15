@@ -51,7 +51,7 @@ def test_settings_get_provider_config() -> None:
     assert gemini_cfg["context"] == 1000000
 
     nim_cfg = settings.get_provider_config("nvidia_nim")
-    assert nim_cfg["rpm"] == 38
+    assert nim_cfg["rpm"] == settings.NVIDIA_NIM_SAFE_RPM
     assert nim_cfg["context"] == 1000000
 
 
