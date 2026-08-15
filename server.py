@@ -8,10 +8,8 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from api.dashboard import router as dashboard_router
+from bot import start_all_bots, stop_all_bots
 from core.gateway import router as api_router
-from messaging.discord_bot import init_discord_bot
-from messaging.manager import messaging_manager
-from messaging.telegram_bot import init_telegram_bot
 
 
 @asynccontextmanager
@@ -19,21 +17,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown lifecycles."""
     logger.info("Initializing Claude Code Proxy Server...")
 
-    # Initialize Telegram Bot
-    tg_bot = init_telegram_bot()
-
-    # Initialize Discord Bot
-    ds_bot = await init_discord_bot()
-
-    # Set references in messaging manager
-    messaging_manager.set_bots(tg_bot, ds_bot)
+    # Start configured Telegram & Discord bots via BotFactory
+    await start_all_bots()
 
     yield
 
     # Shutdown hooks
     logger.info("Shutting down bots...")
-    if ds_bot:
-        await ds_bot.close()
+    await stop_all_bots()
     logger.info("Claude Code Proxy Server shutdown complete.")
 
 

@@ -27,7 +27,108 @@ if env_path.exists():
 else:
     load_dotenv()
 
-_MODELS_YAML_PATH = Path(__file__).parent / "models.yaml"
+DATA_DIR = Path(__file__).parent.parent / ".data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+_MODELS_YAML_PATH = DATA_DIR / "models.yaml"
+
+
+def _ensure_models_yaml_exists() -> None:
+    """Ensure .data/models.yaml exists, generating or migrating from config/models.yaml if missing."""
+    if _MODELS_YAML_PATH.exists():
+        return
+
+    legacy_path = Path(__file__).parent / "models.yaml"
+    if legacy_path.exists():
+        try:
+            _MODELS_YAML_PATH.write_text(legacy_path.read_text(encoding="utf-8"), encoding="utf-8")
+            logger.info("Migrated config/models.yaml -> .data/models.yaml")
+            return
+        except Exception as e:
+            logger.warning(f"Failed to migrate legacy models.yaml: {e}")
+
+    default_yaml_content = """claude_default:
+  display_name: 1. Default (Recommended - Opus 5 / Nemotron 70B)
+  description: "Claude Code CLI Default Selection — Highest capacity 1M context model"
+  primary: open_router/poolside/laguna-xs-2.1:free
+  fallback_order: []
+  metadata:
+    context: 1000000
+    max_output: 32768
+    rpm_limit: 15
+    tpm_limit: 200000
+    tags:
+    - default
+    - opus-5
+    - 1m-context
+    - agentic
+    - coding
+claude_opus:
+  display_name: 2. Opus (1M context - Nemotron 70B / Llama 3.3)
+  description: "Opus 5 with 1M context — Best for everyday, complex tasks"
+  primary: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
+  fallback_order: []
+  metadata:
+    context: 1000000
+    max_output: 32768
+    rpm_limit: 15
+    tpm_limit: 200000
+    tags:
+    - opus-5
+    - 1m-context
+    - reasoning
+    - agentic
+    - coding
+claude_sonnet:
+  display_name: 3. Sonnet (Llama 3.1 70B)
+  description: "Sonnet — Efficient for routine tasks"
+  primary: nvidia_nim/z-ai/glm-5.2
+  fallback_order: []
+  metadata:
+    context: 1000000
+    max_output: 16384
+    rpm_limit: 15
+    tpm_limit: 200000
+    tags:
+    - sonnet
+    - coding
+    - tool-calling
+    - agentic
+claude_sonnet_1m:
+  display_name: 4. Sonnet 5 (1M context - Llama 3.3 70B)
+  description: Sonnet 5 for long sessions with 1M context
+  primary: nvidia_nim/z-ai/glm-5.2
+  fallback_order:
+  - nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
+  - nvidia_nim/poolside/laguna-xs-2.1
+  - gemini/models/gemini-3.1-flash-lite
+  metadata:
+    context: 1000000
+    max_output: 32768
+    rpm_limit: 15
+    tpm_limit: 200000
+    tags:
+    - sonnet-5
+    - 1m-context
+    - coding
+    - tool-calling
+claude_haiku:
+  display_name: 5. Haiku (Fastest 8B / Flash)
+  description: "Haiku 4.5 — Fastest for quick answers"
+  primary: nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b
+  fallback_order: []
+  metadata:
+    context: 200000
+    max_output: 8192
+    rpm_limit: 20
+    tpm_limit: 100000
+    tags:
+    - haiku-4.5
+    - fast
+    - coding
+"""
+    _MODELS_YAML_PATH.write_text(default_yaml_content, encoding="utf-8")
+    logger.info("Generated default .data/models.yaml")
 
 
 @dataclass
@@ -54,6 +155,7 @@ class ModelRegistry:
         self._load()
 
     def _load(self) -> None:
+        _ensure_models_yaml_exists()
         if not _MODELS_YAML_PATH.exists():
             return
         raw: dict[str, Any] = (
@@ -157,6 +259,7 @@ class ModelRegistry:
 
     def save_entries(self, updates: dict[str, dict[str, Any]]) -> None:
         """Update models.yaml with new primary or fallback_order definitions."""
+        _ensure_models_yaml_exists()
         if not _MODELS_YAML_PATH.exists():
             return
         raw: dict[str, Any] = (

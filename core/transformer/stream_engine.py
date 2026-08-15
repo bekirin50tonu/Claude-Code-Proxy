@@ -286,6 +286,10 @@ class StreamEngine:
             # 1. Native reasoning_content
             reasoning = delta.get("reasoning_content") or ""
             if reasoning:
+                import asyncio
+
+                from bot.live_bridge import live_bridge_manager
+                asyncio.create_task(live_bridge_manager.dispatch_thinking_chunk(self.session.session_id, reasoning))
                 events = await self.thinking_parser.process_chunk(
                     {"choices": [{"delta": {"reasoning_content": reasoning}}]}
                 )
@@ -356,7 +360,13 @@ class StreamEngine:
                         if hasattr(ev, "delta"):
                             dtype = getattr(ev.delta, "type", None)
                             if dtype == "thinking_delta":
-                                self.accumulated_thinking.append(getattr(ev.delta, "thinking", ""))
+                                think_val = getattr(ev.delta, "thinking", "")
+                                self.accumulated_thinking.append(think_val)
+                                if think_val:
+                                    import asyncio
+
+                                    from bot.live_bridge import live_bridge_manager
+                                    asyncio.create_task(live_bridge_manager.dispatch_thinking_chunk(self.session.session_id, think_val))
                             elif dtype == "text_delta":
                                 text_val = getattr(ev.delta, "text", "")
                                 self.accumulated_text.append(text_val)
@@ -386,6 +396,10 @@ class StreamEngine:
                         self.accumulated_text.append(content)
                         if content.strip() or content == " ":
                             self.text_or_tool_emitted = True
+                            import asyncio
+
+                            from bot.live_bridge import live_bridge_manager
+                            asyncio.create_task(live_bridge_manager.dispatch_text_chunk(self.session.session_id, content))
                         yield AnthropicSSEFormatter.text_delta(content, self._get_current_index())
 
         # Flush Thinking Parser
@@ -393,7 +407,13 @@ class StreamEngine:
             if hasattr(flush_ev, "delta"):
                 dtype = getattr(flush_ev.delta, "type", None)
                 if dtype == "thinking_delta":
-                    self.accumulated_thinking.append(getattr(flush_ev.delta, "thinking", ""))
+                    think_val = getattr(flush_ev.delta, "thinking", "")
+                    self.accumulated_thinking.append(think_val)
+                    if think_val:
+                        import asyncio
+
+                        from bot.live_bridge import live_bridge_manager
+                        asyncio.create_task(live_bridge_manager.dispatch_thinking_chunk(self.session.session_id, think_val))
                 elif dtype == "text_delta":
                     text_val = getattr(flush_ev.delta, "text", "")
                     self.accumulated_text.append(text_val)
@@ -428,6 +448,10 @@ class StreamEngine:
                     "input": parsed_args,
                 }
             )
+            import asyncio
+
+            from bot.live_bridge import live_bridge_manager
+            asyncio.create_task(live_bridge_manager.dispatch_tool_call(self.session.session_id, self.active_tool_name, parsed_args))
             self.text_or_tool_emitted = True
 
         # Extract embedded JSON tool calls from accumulated text if no native tool calls were present
@@ -442,6 +466,10 @@ class StreamEngine:
                     yield AnthropicSSEFormatter.input_json_delta(json.dumps(tool["input"]), idx)
                     yield AnthropicSSEFormatter.block_stop(idx)
                     self.accumulated_tool_calls.append(tool)
+                    import asyncio
+
+                    from bot.live_bridge import live_bridge_manager
+                    asyncio.create_task(live_bridge_manager.dispatch_tool_call(self.session.session_id, tool["name"], tool.get("input", {})))
                 finish_reason = "tool_calls"
                 self.text_or_tool_emitted = True
 
@@ -454,15 +482,16 @@ class StreamEngine:
 
         # --- ASYNCHRONOUS SAFETY NET (PREEMPTIVE / FALLBACK INJECTION) ---
         # If no text content and no tool calls were emitted throughout the entire stream,
-        # inject a single space text_delta so Claude Code CLI never crashes with:
-        # "model output must contain either output text or tool calls, these cannot both be empty"
+        # inject accumulated thinking text as text_delta (or space if no thinking) so Claude Code CLI gets the result!
         if not self.text_or_tool_emitted:
+            full_think_text = "".join(self.accumulated_thinking).strip()
+            fallback_text = full_think_text if full_think_text else " "
             idx = self._next_block_index()
             yield AnthropicSSEFormatter.text_start(idx)
-            yield AnthropicSSEFormatter.text_delta(" ", idx)
+            yield AnthropicSSEFormatter.text_delta(fallback_text, idx)
             yield AnthropicSSEFormatter.block_stop(idx)
             self.text_or_tool_emitted = True
-            self.accumulated_text.append(" ")
+            self.accumulated_text.append(fallback_text)
 
         self.final_stop_reason = stop_reason
         self.final_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
