@@ -28,8 +28,49 @@ class SubagentGuard(BaseAtomicParser):
 
         return tool_input
 
+    def sanitize_payload(self, body: dict[str, Any], enabled: bool) -> dict[str, Any]:
+        """Inspect incoming /v1/messages request payload.
+
+        If enabled is True (ON):
+            Leave payload untouched so run_in_background=True reaches upstream.
+        If enabled is False (OFF Bypass):
+            Force run_in_background=False in messages, tool calls, and payload fields to prevent background subagents.
+        """
+        if enabled:
+            # Switch is ON: Do not touch request body
+            return body
+
+        # Switch is OFF: Enforce foreground execution / disable background subagents
+        if "run_in_background" in body:
+            body["run_in_background"] = False
+
+        messages = body.get("messages", [])
+        if isinstance(messages, list):
+            for msg in messages:
+                if not isinstance(msg, dict):
+                    continue
+                content = msg.get("content")
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "tool_use":
+                            tool_input = block.get("input")
+                            tool_name = block.get("name", "")
+                            if isinstance(tool_input, dict):
+                                if "run_in_background" in tool_input or tool_name in self.TASK_TOOL_NAMES or "task" in tool_name.lower():
+                                    if tool_input.get("run_in_background") is not False:
+                                        logger.warning("SubagentGuard (OFF Bypass): Overriding run_in_background=False for tool '{}'", tool_name)
+                                        tool_input["run_in_background"] = False
+                                        self.enforcements_count += 1
+
+        return body
+
     async def process_chunk(self, chunk: dict[str, Any] | str) -> list[SSEBaseEvent]:
         return []
 
     async def flush(self) -> list[SSEBaseEvent]:
         return []
+
+
+# Singleton instance
+subagent_guard = SubagentGuard()
+

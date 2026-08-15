@@ -101,6 +101,15 @@ class ConfigSaveRequest(BaseModel):
     configs: dict[str, Any]
 
 
+class SubagentsToggleRequest(BaseModel):
+    enabled: bool
+
+
+# Global in-memory server state for Subagents Emergency Switch
+SUBAGENTS_ENABLED: bool = True
+
+
+
 async def fetch_models_from_url(
     url: str, headers: dict[str, str] | None = None
 ) -> list[str]:
@@ -136,6 +145,7 @@ def get_key_statuses() -> dict[str, str]:
     env_keys = get_env_file_keys()
     statuses = {}
     managed_keys = [
+        "NVIDIA_NIM_API_KEYS",
         "NVIDIA_NIM_API_KEY",
         "OPENROUTER_API_KEY",
         "GATEWAY_AUTH_TOKEN",
@@ -308,8 +318,10 @@ async def get_config() -> JSONResponse:
     """Return in-memory settings configuration values, Lock Statuses, and Model Registry fallbacks."""
     from config import model_registry
 
+    nim_key_val = settings.NVIDIA_NIM_API_KEY or getattr(settings, "NVIDIA_NIM_API_KEYS", "")
     config_data = {
-        "NVIDIA_NIM_API_KEY": settings.NVIDIA_NIM_API_KEY,
+        "NVIDIA_NIM_API_KEY": nim_key_val,
+        "NVIDIA_NIM_API_KEYS": nim_key_val,
         "OPENROUTER_API_KEY": settings.OPENROUTER_API_KEY,
         "GATEWAY_AUTH_TOKEN": settings.GATEWAY_AUTH_TOKEN,
         "MISTRAL_API_KEY": settings.MISTRAL_API_KEY,
@@ -429,6 +441,9 @@ async def save_config(req: ConfigSaveRequest) -> JSONResponse:
                 continue
             filtered_configs[key] = val
 
+        if "NVIDIA_NIM_API_KEY" in filtered_configs:
+            filtered_configs["NVIDIA_NIM_API_KEYS"] = filtered_configs["NVIDIA_NIM_API_KEY"]
+
         save_env_values(filtered_configs)
         if fallback_updates:
             model_registry.save_entries(fallback_updates)
@@ -447,6 +462,28 @@ async def save_config(req: ConfigSaveRequest) -> JSONResponse:
             status_code=500,
             content={"status": "error", "message": f"Failed to save settings: {e}"},
         )
+
+
+@router.get("/api/settings/subagents")
+async def get_subagents_setting() -> JSONResponse:
+    """Return current global SUBAGENTS_ENABLED status."""
+    return JSONResponse(content={"subagents_enabled": SUBAGENTS_ENABLED})
+
+
+@router.post("/api/settings/subagents")
+async def toggle_subagents_setting(req: SubagentsToggleRequest) -> JSONResponse:
+    """Update global SUBAGENTS_ENABLED emergency switch status."""
+    global SUBAGENTS_ENABLED
+    SUBAGENTS_ENABLED = bool(req.enabled)
+    logger.info("Subagents Emergency Switch updated: SUBAGENTS_ENABLED={}", SUBAGENTS_ENABLED)
+    return JSONResponse(
+        content={
+            "status": "success",
+            "subagents_enabled": SUBAGENTS_ENABLED,
+            "message": f"Subagent execution is now {'ENABLED (ON)' if SUBAGENTS_ENABLED else 'DISABLED (OFF Bypass)'}.",
+        }
+    )
+
 
 
 @router.get("/api/stats")

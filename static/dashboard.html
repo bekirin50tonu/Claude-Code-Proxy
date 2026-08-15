@@ -74,7 +74,7 @@
             <button type="button" class="control-btn" data-pane="pane-keys" onclick="switchPane('pane-keys', this)">API Credentials</button>
             <button type="button" class="control-btn" data-pane="pane-endpoints" onclick="switchPane('pane-endpoints', this)">Local Endpoints</button>
             <button type="button" class="control-btn" data-pane="pane-tunnels" onclick="switchPane('pane-tunnels', this)">Proxy Tunnels &amp; Base URLs</button>
-            <button type="button" class="control-btn" data-pane="pane-mocks" onclick="switchPane('pane-mocks', this)">Mock Engines</button>
+            <button type="button" class="control-btn" data-pane="pane-mocks" onclick="switchPane('pane-mocks', this)">Settings</button>
             <button type="button" class="control-btn" data-pane="pane-limits" onclick="switchPane('pane-limits', this)">Throttle &amp; Timeouts</button>
             <button type="button" class="control-btn" data-pane="pane-bots" onclick="switchPane('pane-bots', this)">Bot Matrix</button>
             <button type="button" class="control-btn" data-pane="pane-guide" onclick="switchPane('pane-guide', this)">Setup Guide</button>
@@ -447,13 +447,13 @@
                                 <button type="button" class="input-icon-btn" onclick="toggleMask('GATEWAY_AUTH_TOKEN')">Show</button>
                             </div>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group full-width">
                             <div class="label-row">
-                                <label for="NVIDIA_NIM_API_KEY">NVIDIA NIM API Key</label>
+                                <label for="NVIDIA_NIM_API_KEY">NVIDIA NIM API Key(s) (Single key or comma-separated keys for pool rotation)</label>
                                 <span id="badge-NVIDIA_NIM_API_KEY" class="badge-status">...</span>
                             </div>
                             <div class="input-wrapper">
-                                <input type="password" id="NVIDIA_NIM_API_KEY" placeholder="nvapi-...">
+                                <input type="password" id="NVIDIA_NIM_API_KEY" placeholder="nvapi-key1, nvapi-key2, nvapi-key3">
                                 <button type="button" class="input-icon-btn" onclick="toggleMask('NVIDIA_NIM_API_KEY')">Show</button>
                             </div>
                         </div>
@@ -571,47 +571,66 @@
                     </div>
                 </div>
 
-                <!-- PANE 4: MOCK ENGINES -->
+                <!-- PANE 4: SETTINGS -->
                 <div id="pane-mocks" class="panel-pane">
                     <div class="panel-header">
-                        <h2>Mock Optimization Engines</h2>
-                        <p>Toggle local processing optimizations to speed up Claude Code interactions.</p>
+                        <h2>Settings</h2>
+                        <p>Configure subagent execution policy switches, local mock engine optimizations, and system controls.</p>
                     </div>
-                    <div style="display: flex; flex-direction: column; gap: 1rem;">
-                        <div class="setting-switch">
-                            <div class="setting-switch-desc">
-                                <h4>Fast Prefix Detection</h4>
-                                <p>Extract command safety prefix checks locally.</p>
+
+                    <!-- Category 1: Subagent & Execution Control -->
+                    <div style="margin-bottom: 1.5rem;">
+                        <h3 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">Subagent &amp; Execution Control</h3>
+                        <div style="display: flex; flex-direction: column; gap: 1rem;">
+                            <div class="setting-switch">
+                                <div class="setting-switch-desc">
+                                    <h4>Subagent Emergency Switch (ON/OFF Bypass)</h4>
+                                    <p>When ON, background subagents execute normally. When OFF, intercepts and forces run_in_background=False to bypass background processes.</p>
+                                </div>
+                                <input type="checkbox" id="SUBAGENTS_ENABLED" onchange="toggleSubagentEmergencySwitch(this.checked)">
                             </div>
-                            <input type="checkbox" id="FAST_PREFIX_DETECTION">
                         </div>
-                        <div class="setting-switch">
-                            <div class="setting-switch-desc">
-                                <h4>Network Probe Mocking</h4>
-                                <p>Immediately respond to system network and quota status diagnostics.</p>
+                    </div>
+
+                    <!-- Category 2: Mock Optimization Engines -->
+                    <div style="border-top: 1px solid var(--border-subtle); padding-top: 1.5rem;">
+                        <h3 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;">Mock Optimization Engines</h3>
+                        <div style="display: flex; flex-direction: column; gap: 1rem;">
+                            <div class="setting-switch">
+                                <div class="setting-switch-desc">
+                                    <h4>Fast Prefix Detection</h4>
+                                    <p>Extract command safety prefix checks locally.</p>
+                                </div>
+                                <input type="checkbox" id="FAST_PREFIX_DETECTION">
                             </div>
-                            <input type="checkbox" id="ENABLE_NETWORK_PROBE_MOCK">
-                        </div>
-                        <div class="setting-switch">
-                            <div class="setting-switch-desc">
-                                <h4>Skip Title Generation</h4>
-                                <p>Prevent external requests for generation of workspace thread titles.</p>
+                            <div class="setting-switch">
+                                <div class="setting-switch-desc">
+                                    <h4>Network Probe Mocking</h4>
+                                    <p>Immediately respond to system network and quota status diagnostics.</p>
+                                </div>
+                                <input type="checkbox" id="ENABLE_NETWORK_PROBE_MOCK">
                             </div>
-                            <input type="checkbox" id="ENABLE_TITLE_GENERATION_SKIP">
-                        </div>
-                        <div class="setting-switch">
-                            <div class="setting-switch-desc">
-                                <h4>Skip Suggestion Autocomplete</h4>
-                                <p>Mock auto-completions in suggestion terminal queries locally.</p>
+                            <div class="setting-switch">
+                                <div class="setting-switch-desc">
+                                    <h4>Skip Title Generation</h4>
+                                    <p>Prevent external requests for generation of workspace thread titles.</p>
+                                </div>
+                                <input type="checkbox" id="ENABLE_TITLE_GENERATION_SKIP">
                             </div>
-                            <input type="checkbox" id="ENABLE_SUGGESTION_MODE_SKIP">
-                        </div>
-                        <div class="setting-switch">
-                            <div class="setting-switch-desc">
-                                <h4>Filepath Extraction Mocking</h4>
-                                <p>Perform filepath lookup extractions with a regex parser engine.</p>
+                            <div class="setting-switch">
+                                <div class="setting-switch-desc">
+                                    <h4>Skip Suggestion Autocomplete</h4>
+                                    <p>Mock auto-completions in suggestion terminal queries locally.</p>
+                                </div>
+                                <input type="checkbox" id="ENABLE_SUGGESTION_MODE_SKIP">
                             </div>
-                            <input type="checkbox" id="ENABLE_FILEPATH_EXTRACTION_MOCK">
+                            <div class="setting-switch">
+                                <div class="setting-switch-desc">
+                                    <h4>Filepath Extraction Mocking</h4>
+                                    <p>Perform filepath lookup extractions with a regex parser engine.</p>
+                                </div>
+                                <input type="checkbox" id="ENABLE_FILEPATH_EXTRACTION_MOCK">
+                            </div>
                         </div>
                     </div>
                 </div>
