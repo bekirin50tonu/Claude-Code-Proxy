@@ -19,12 +19,26 @@ class SubagentGuard(BaseAtomicParser):
     def reset(self) -> None:
         self.enforcements_count = 0
 
-    async def enforce_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-        """Inspect tool_input and enforce run_in_background=False policy."""
-        if (tool_name in self.TASK_TOOL_NAMES or "task" in tool_name.lower()) and tool_input.get("run_in_background") is not False:
-            logger.warning("SubagentGuard: Enforcing run_in_background=False on subagent tool '{}'", tool_name)
-            tool_input["run_in_background"] = False
-            self.enforcements_count += 1
+    async def enforce_tool_call(self, tool_name: str, tool_input: dict[str, Any], enabled: bool | None = None) -> dict[str, Any]:
+        """Inspect tool_input and enforce run_in_background=False policy when SUBAGENTS_ENABLED is False (OFF Bypass).
+        
+        If enabled is True (ON):
+            Leave tool_input untouched so run_in_background=True reaches output stream intact.
+        If enabled is False (OFF Bypass):
+            Force run_in_background=False to bypass background processes.
+        """
+        if enabled is None:
+            try:
+                from api.dashboard import SUBAGENTS_ENABLED
+                enabled = SUBAGENTS_ENABLED
+            except Exception:
+                enabled = True
+
+        if not enabled:
+            if (tool_name in self.TASK_TOOL_NAMES or "task" in tool_name.lower()) and tool_input.get("run_in_background") is not False:
+                logger.warning("SubagentGuard (OFF Bypass): Enforcing run_in_background=False on subagent tool '{}'", tool_name)
+                tool_input["run_in_background"] = False
+                self.enforcements_count += 1
 
         return tool_input
 

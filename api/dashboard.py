@@ -266,7 +266,7 @@ STATIC_DIR = Path(__file__).parent.parent / "static"
 
 @router.get("/dashboard", response_class=FileResponse)
 async def get_dashboard_ui() -> FileResponse:
-    """Serve the static Hermes Gate dashboard HTML page."""
+    """Serve the static Claude Gate dashboard HTML page."""
     html_file = STATIC_DIR / "dashboard.html"
     return FileResponse(html_file, media_type="text/html")
 
@@ -505,6 +505,7 @@ async def get_stats() -> JSONResponse:
             "mocked_requests": stats.mocked_requests,
             "error_count": stats.error_count,
             "active_concurrency": stats.active_concurrency,
+            "subagents_enabled": SUBAGENTS_ENABLED,
             "tg_bot_status": "Online" if tg_online else "Offline",
             "ds_bot_status": "Online" if ds_online else "Offline",
             "endpoints": {
@@ -713,3 +714,160 @@ async def get_raw_dev_logs() -> Response:
     if not log_file.exists():
         return Response(content="", media_type="text/plain")
     return Response(content=log_file.read_text(encoding="utf-8"), media_type="text/plain")
+
+
+@router.get("/api/dev/metrics")
+async def get_dev_metrics() -> JSONResponse:
+    """Return real-time performance metrics, RPM per model, estimated queue wait delays, and NIM key pool telemetry."""
+    import time
+    now = time.time()
+
+    recent_logs = stats.recent_requests
+    logs_last_60s = [log for log in recent_logs if (now - getattr(log, "created_at", now)) <= 60.0]
+
+    model_stats: dict[str, dict[str, Any]] = {}
+    router_status = model_router.get_status()
+
+    from config import model_registry
+
+    all_target_models = set(router_status.keys())
+    for entry in model_registry._entries.values():
+        if entry.primary:
+            all_target_models.add(entry.primary)
+        for fb in entry.fallback_order:
+            if fb:
+                all_target_models.add(fb)
+
+    for cat, m_list in FALLBACK_MODELS.items():
+        for m in m_list:
+            if "/" in m:
+                if not m.startswith("nvidia_nim/") and not m.startswith("openrouter/") and not m.startswith("gemini/") and not m.startswith("deepseek/"):
+                    prefix = "nvidia_nim" if cat == "nvidia_nim" else "openrouter"
+                    all_target_models.add(f"{prefix}/{m}")
+                else:
+                    all_target_models.add(m)
+
+    for model_id in sorted(all_target_models):
+        model_stats[model_id] = {
+            "model_id": model_id,
+            "rpm_60s": 0,
+            "total_requests": 0,
+            "success_count": 0,
+            "error_count": 0,
+            "total_latency_ms": 0.0,
+            "avg_latency_ms": 0.0,
+            "success_rate": 100.0,
+            "estimated_wait_s": 0.0,
+            "circuit_state": "closed",
+            "recovery_remaining_s": None,
+            "req_remaining": None,
+            "has_headroom": True,
+        }
+
+    for log in recent_logs:
+        mid = log.mapped_model
+        if not mid or mid in ("unknown", "none"):
+            continue
+        if mid not in model_stats:
+            model_stats[mid] = {
+                "model_id": mid,
+                "rpm_60s": 0,
+                "total_requests": 0,
+                "success_count": 0,
+                "error_count": 0,
+                "total_latency_ms": 0.0,
+                "avg_latency_ms": 0.0,
+                "success_rate": 100.0,
+                "estimated_wait_s": 0.0,
+                "circuit_state": "closed",
+                "recovery_remaining_s": None,
+                "req_remaining": None,
+                "has_headroom": True,
+            }
+
+        st = model_stats[mid]
+        st["total_requests"] += 1
+        st["total_latency_ms"] += log.duration_ms
+        if log.status_code < 400:
+            st["success_count"] += 1
+        else:
+            st["error_count"] += 1
+
+    for log in logs_last_60s:
+        mid = log.mapped_model
+        if mid in model_stats:
+            model_stats[mid]["rpm_60s"] += 1
+
+    from atomic.guards.nim_guard import nim_throttle_guard
+    from core.key_manager import nim_key_manager
+
+    nim_timestamps = getattr(nim_throttle_guard, "_timestamps", [])
+    nim_rpm_current = len(nim_timestamps)
+    nim_rpm_limit = nim_throttle_guard.rpm_limit
+    nim_wait_s = 0.0
+    if nim_rpm_current >= nim_rpm_limit and nim_timestamps:
+        mono_now = time.monotonic()
+        oldest = nim_timestamps[0]
+        nim_wait_s = max(0.0, round((oldest + nim_throttle_guard.window_seconds) - mono_now, 1))
+
+    keys = nim_key_manager.get_configured_keys()
+    passive_until_dict = getattr(nim_key_manager, "_passive_until", {})
+    passive_keys = [k for k in keys if passive_until_dict.get(k, 0.0) > now]
+    active_keys = [k for k in keys if passive_until_dict.get(k, 0.0) <= now]
+
+    key_details = []
+    for k in keys:
+        cool = passive_until_dict.get(k, 0.0)
+        rem_cool = max(0.0, round(cool - now, 1)) if cool > now else 0.0
+        masked = k[:7] + "..." + k[-4:] if len(k) > 12 else k
+        key_details.append({
+            "key_masked": masked,
+            "status": "Active" if rem_cool == 0 else f"Passive (Cooldown: {rem_cool}s)",
+            "cooldown_s": rem_cool,
+        })
+
+    for mid, st in model_stats.items():
+        if st["total_requests"] > 0:
+            st["avg_latency_ms"] = round(st["total_latency_ms"] / st["total_requests"], 1)
+            st["success_rate"] = round((st["success_count"] / st["total_requests"]) * 100, 1)
+
+        r_info = router_status.get(mid, {})
+        cb = r_info.get("circuit_breaker", {})
+        rl = r_info.get("rate_limit", {})
+
+        st["circuit_state"] = cb.get("state", "closed")
+        st["recovery_remaining_s"] = cb.get("recovery_remaining_s")
+        st["has_headroom"] = rl.get("has_headroom", True)
+        st["req_remaining"] = rl.get("req_remaining")
+
+        if st["circuit_state"] == "open" and st["recovery_remaining_s"]:
+            st["estimated_wait_s"] = st["recovery_remaining_s"]
+        elif "nvidia_nim" in mid.lower() and nim_wait_s > 0:
+            st["estimated_wait_s"] = nim_wait_s
+
+    global_rpm = len(logs_last_60s)
+    total_latency_sum = sum(log.duration_ms for log in recent_logs)
+    global_avg_latency = round(total_latency_sum / len(recent_logs), 1) if recent_logs else 0.0
+
+    return JSONResponse(
+        content={
+            "global_metrics": {
+                "global_rpm": global_rpm,
+                "active_concurrency": stats.active_concurrency,
+                "global_avg_latency_ms": global_avg_latency,
+                "total_requests": stats.total_requests,
+                "mocked_requests": stats.mocked_requests,
+            },
+            "nim_telemetry": {
+                "current_rpm": nim_rpm_current,
+                "rpm_limit": nim_rpm_limit,
+                "estimated_delay_s": nim_wait_s,
+                "total_keys": len(keys),
+                "active_keys": len(active_keys),
+                "passive_keys": len(passive_keys),
+                "key_details": key_details,
+            },
+            "model_metrics": list(model_stats.values()),
+        }
+    )
+

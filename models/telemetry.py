@@ -5,6 +5,7 @@ Defines structured dataclasses for request/response logging,
 performance metrics, and system-wide traffic telemetry.
 """
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -30,6 +31,7 @@ class RequestLogEntry:
     output_tokens: int = 0
     error_details: dict[str, Any] | None = None
     attempt_history: list[dict[str, Any]] = field(default_factory=list)
+    created_at: float = field(default_factory=time.time)
 
     @property
     def is_success(self) -> bool:

@@ -86,6 +86,7 @@ async function loadConfigs() {
         }
 
         startLiveAutoRefresh();
+        await fetchSubagentEmergencyStatus();
     } catch (e) {
         console.error("Failed to load configs", e);
     }
@@ -213,6 +214,21 @@ async function saveConfigs(event) {
         payload[inputId] = (tagState[inputId] || []).join(', ');
     });
 
+
+    // Save Subagent Emergency Switch status if present
+    const subagentEl = document.getElementById('SUBAGENTS_ENABLED');
+    if (subagentEl) {
+        try {
+            await fetch('/api/settings/subagents', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: subagentEl.checked })
+            });
+            subagentsEnabledState = subagentEl.checked;
+        } catch (e) {
+            console.error("Failed to save subagent switch", e);
+        }
+    }
 
     try {
         const resp = await fetch('/api/config', {
@@ -820,36 +836,159 @@ function switchDevSubTab(tab) {
     try { localStorage.setItem('active_dev_subtab', tab); } catch(e){}
     const inspectorEl = document.getElementById('dev-subtab-inspector');
     const traceEl = document.getElementById('dev-subtab-trace');
+    const metricsEl = document.getElementById('dev-subtab-metrics');
     const btnInspector = document.getElementById('dev-subtab-btn-inspector');
     const btnTrace = document.getElementById('dev-subtab-btn-trace');
-    if (!inspectorEl || !traceEl) return;
+    const btnMetrics = document.getElementById('dev-subtab-btn-metrics');
+    if (!inspectorEl || !traceEl || !metricsEl) return;
+
+    [inspectorEl, traceEl, metricsEl].forEach(el => el.style.display = 'none');
+    [btnInspector, btnTrace, btnMetrics].forEach(btn => {
+        if (!btn) return;
+        btn.classList.remove('active');
+        btn.style.borderColor = 'var(--border-subtle)';
+        btn.style.background = 'transparent';
+        btn.style.color = 'var(--text-muted)';
+        btn.style.fontWeight = 'normal';
+    });
 
     if (tab === 'trace') {
-        inspectorEl.style.display = 'none';
         traceEl.style.display = 'block';
-        btnInspector.classList.remove('active');
-        btnInspector.style.borderColor = 'var(--border-subtle)';
-        btnInspector.style.background = 'transparent';
-        btnInspector.style.color = 'var(--text-muted)';
-        btnInspector.style.fontWeight = 'normal';
-        btnTrace.classList.add('active');
-        btnTrace.style.borderColor = '#eab308';
-        btnTrace.style.background = 'rgba(234, 179, 8, 0.15)';
-        btnTrace.style.color = '#ffffff';
-        btnTrace.style.fontWeight = '700';
+        if (btnTrace) {
+            btnTrace.classList.add('active');
+            btnTrace.style.borderColor = '#eab308';
+            btnTrace.style.background = 'rgba(234, 179, 8, 0.15)';
+            btnTrace.style.color = '#ffffff';
+            btnTrace.style.fontWeight = '700';
+        }
+    } else if (tab === 'metrics') {
+        metricsEl.style.display = 'block';
+        if (btnMetrics) {
+            btnMetrics.classList.add('active');
+            btnMetrics.style.borderColor = '#eab308';
+            btnMetrics.style.background = 'rgba(234, 179, 8, 0.15)';
+            btnMetrics.style.color = '#ffffff';
+            btnMetrics.style.fontWeight = '700';
+        }
+        fetchDevMetrics();
     } else {
         inspectorEl.style.display = 'block';
-        traceEl.style.display = 'none';
-        btnTrace.classList.remove('active');
-        btnTrace.style.borderColor = 'var(--border-subtle)';
-        btnTrace.style.background = 'transparent';
-        btnTrace.style.color = 'var(--text-muted)';
-        btnTrace.style.fontWeight = 'normal';
-        btnInspector.classList.add('active');
-        btnInspector.style.borderColor = '#eab308';
-        btnInspector.style.background = 'rgba(234, 179, 8, 0.15)';
-        btnInspector.style.color = '#ffffff';
-        btnInspector.style.fontWeight = '700';
+        if (btnInspector) {
+            btnInspector.classList.add('active');
+            btnInspector.style.borderColor = '#eab308';
+            btnInspector.style.background = 'rgba(234, 179, 8, 0.15)';
+            btnInspector.style.color = '#ffffff';
+            btnInspector.style.fontWeight = '700';
+        }
+    }
+}
+
+async function fetchDevMetrics() {
+    try {
+        const resp = await fetch('/api/dev/metrics');
+        const data = await resp.json();
+        if (!data) return;
+
+        const gm = data.global_metrics || {};
+        const elRpm = document.getElementById('metrics-global-rpm');
+        if (elRpm) elRpm.innerHTML = `${gm.global_rpm || 0} <span style="font-size: 0.7rem; color: var(--text-dim);">req/min</span>`;
+
+        const elConc = document.getElementById('metrics-active-concurrency');
+        if (elConc) elConc.innerHTML = `${gm.active_concurrency || 0} <span style="font-size: 0.7rem; color: var(--text-dim);">workers</span>`;
+
+        const elLat = document.getElementById('metrics-avg-latency');
+        if (elLat) elLat.innerHTML = `${gm.global_avg_latency_ms || 0} <span style="font-size: 0.7rem; color: var(--text-dim);">ms</span>`;
+
+        const nim = data.nim_telemetry || {};
+        const elNimSum = document.getElementById('metrics-nim-summary');
+        if (elNimSum) {
+            elNimSum.innerHTML = `${nim.active_keys || 0}/${nim.total_keys || 0} Keys | <span style="font-size: 0.85rem; color: white;">${nim.current_rpm || 0}/${nim.rpm_limit || 38} RPM</span>`;
+        }
+
+        const elWaitBadge = document.getElementById('metrics-nim-wait-badge');
+        if (elWaitBadge) {
+            if ((nim.estimated_delay_s || 0) > 0) {
+                elWaitBadge.innerText = `QUEUED DELAY (${nim.estimated_delay_s}s)`;
+                elWaitBadge.style.color = '#f87171';
+                elWaitBadge.style.background = 'rgba(248, 113, 113, 0.1)';
+                elWaitBadge.style.borderColor = 'rgba(248, 113, 113, 0.3)';
+            } else {
+                elWaitBadge.innerText = 'NO DELAY (0.0s)';
+                elWaitBadge.style.color = '#4ade80';
+                elWaitBadge.style.background = 'rgba(74, 222, 128, 0.1)';
+                elWaitBadge.style.borderColor = 'rgba(74, 222, 128, 0.3)';
+            }
+        }
+
+        const elNimRpmText = document.getElementById('metrics-nim-rpm-text');
+        if (elNimRpmText) elNimRpmText.innerText = `${nim.current_rpm || 0} / ${nim.rpm_limit || 38} RPM`;
+
+        const elNimBar = document.getElementById('metrics-nim-progress-bar');
+        if (elNimBar) {
+            const pct = Math.min(100, Math.round(((nim.current_rpm || 0) / (nim.rpm_limit || 38)) * 100));
+            elNimBar.style.width = `${pct}%`;
+            elNimBar.style.background = pct > 85 ? '#f87171' : (pct > 60 ? '#facc15' : '#4ade80');
+        }
+
+        const elKeyList = document.getElementById('metrics-key-pool-list');
+        if (elKeyList && Array.isArray(nim.key_details)) {
+            if (nim.key_details.length === 0) {
+                elKeyList.innerHTML = `<span style="font-size: 0.7rem; color: var(--text-dim);">No NIM keys loaded</span>`;
+            } else {
+                elKeyList.innerHTML = nim.key_details.map(k => {
+                    const isPassive = k.cooldown_s > 0;
+                    const col = isPassive ? '#f87171' : '#4ade80';
+                    const bg = isPassive ? 'rgba(248,113,113,0.1)' : 'rgba(74,222,128,0.1)';
+                    return `<span style="font-size: 0.68rem; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: ${col}; background: ${bg}; border: 1px solid ${col}44; padding: 2px 6px; border-radius: 4px;">🔑 ${escapeHtml(k.key_masked)} (${isPassive ? k.cooldown_s + 's cooldown' : 'Active'})</span>`;
+                }).join('');
+            }
+        }
+
+        const tbody = document.getElementById('metrics-table-body');
+        if (!tbody) return;
+
+        const models = data.model_metrics || [];
+        if (models.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="7" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">No models tracked yet.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = models.map(m => {
+            const isCbOpen = m.circuit_state === 'open';
+            const cbBadge = isCbOpen
+                ? `<span style="color: #f87171; font-weight: 800; font-size: 0.7rem;">● CIRCUIT OPEN (${m.recovery_remaining_s || 0}s recovery)</span>`
+                : (m.circuit_state === 'half_open'
+                    ? `<span style="color: #facc15; font-weight: 800; font-size: 0.7rem;">● HALF OPEN</span>`
+                    : `<span style="color: #4ade80; font-weight: 700; font-size: 0.7rem;">● CLOSED (HEALTHY)</span>`);
+
+            const waitStr = (m.estimated_wait_s || 0) > 0
+                ? `<span style="color: #f87171; font-weight: 800; font-family: 'JetBrains Mono', monospace;">⏳ ${m.estimated_wait_s}s wait</span>`
+                : `<span style="color: #4ade80; font-family: 'JetBrains Mono', monospace;">0.0s</span>`;
+
+            const succColor = m.success_rate >= 90 ? '#4ade80' : (m.success_rate >= 70 ? '#facc15' : '#f87171');
+            const rpmBadge = m.rpm_60s > 0
+                ? `<span style="color: #ffffff; font-weight: 800; font-family: 'JetBrains Mono', monospace;">${m.rpm_60s} req/min</span>`
+                : `<span style="color: var(--text-dim); font-family: 'JetBrains Mono', monospace;">0 req/min</span>`;
+
+            const headroomBadge = m.has_headroom
+                ? (m.req_remaining !== null
+                    ? `<span style="color: white; font-family: 'JetBrains Mono', monospace;">${m.req_remaining} req left</span>`
+                    : `<span style="color: #4ade80;">OK (100%)</span>`)
+                : `<span style="color: #f87171; font-weight: 700;">TIGHT / LIMITED</span>`;
+
+            return `<tr style="border-bottom: 1px solid var(--border-subtle);">
+                <td style="padding: 0.75rem 1rem; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: white;">${escapeHtml(m.model_id)}</td>
+                <td style="padding: 0.75rem 1rem; text-align: center;">${rpmBadge}</td>
+                <td style="padding: 0.75rem 1rem; text-align: center;">${waitStr}</td>
+                <td style="padding: 0.75rem 1rem; text-align: center; font-family: 'JetBrains Mono', monospace;">${m.avg_latency_ms} ms</td>
+                <td style="padding: 0.75rem 1rem; text-align: center; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: ${succColor};">${m.success_rate}%</td>
+                <td style="padding: 0.75rem 1rem;">${cbBadge}</td>
+                <td style="padding: 0.75rem 1rem; text-align: right;">${headroomBadge}</td>
+            </tr>`;
+        }).join('');
+
+    } catch (e) {
+        console.error("Failed to fetch dev metrics", e);
     }
 }
 
@@ -1058,6 +1197,22 @@ async function pollTelemetry() {
         }
         document.getElementById('telemetry-mock-badge').innerText = `${data.mocked_requests} / ${data.total_requests} SAVES`;
 
+        // Update Subagent Status minimal badge in Gateway Port dial card
+        const subBadge = document.getElementById('telemetry-subagent-badge');
+        if (subBadge && data.subagents_enabled !== undefined) {
+            if (data.subagents_enabled) {
+                subBadge.innerText = 'SUBAGENTS: ON';
+                subBadge.style.color = '#4ade80';
+                subBadge.style.background = 'rgba(74, 222, 128, 0.08)';
+                subBadge.style.borderColor = 'rgba(74, 222, 128, 0.3)';
+            } else {
+                subBadge.innerText = 'SUBAGENTS: OFF';
+                subBadge.style.color = '#f87171';
+                subBadge.style.background = 'rgba(248, 113, 113, 0.08)';
+                subBadge.style.borderColor = 'rgba(248, 113, 113, 0.3)';
+            }
+        }
+
         // Update Bot connectivity
         const dsEl = document.getElementById('telemetry-discord');
         if (dsEl) {
@@ -1087,7 +1242,7 @@ async function pollTelemetry() {
 
         // Automatically refresh Dev Mode payloads on every telemetry poll
         await fetchDevPayloads();
-        await fetchSubagentEmergencyStatus();
+        await fetchDevMetrics();
 
     } catch (e) {
         console.error("Telemetry polling failed", e);

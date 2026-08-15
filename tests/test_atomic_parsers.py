@@ -51,11 +51,11 @@ async def test_heuristic_tool_parser_bash() -> None:
 
 @pytest.mark.asyncio
 async def test_subagent_guard_enforcement() -> None:
-    """Test SubagentGuard enforcing run_in_background=False on Task tool calls."""
+    """Test SubagentGuard enforcing run_in_background=False on Task tool calls in OFF bypass mode."""
     guard = SubagentGuard()
 
     input_data = {"prompt": "Analyze repo", "run_in_background": True}
-    policed = await guard.enforce_tool_call("Task", input_data)
+    policed = await guard.enforce_tool_call("Task", input_data, enabled=False)
 
     assert policed["run_in_background"] is False
     assert guard.enforcements_count == 1

@@ -470,7 +470,7 @@ def test_dashboard_endpoints() -> None:
     # 3. Test GET /dashboard HTML page
     resp = client.get("/dashboard")
     assert resp.status_code == 200
-    assert "HERMES GATE" in resp.text
+    assert "CLAUDE GATE" in resp.text
 
     # 4. Test GET /api/models autocomplete aggregations
     resp = client.get("/api/models")
