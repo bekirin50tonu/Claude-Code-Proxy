@@ -166,10 +166,10 @@ class OpenAICompatibleProvider(BaseProvider):
                         json=payload,
                     )
                     try:
-                        response = await asyncio.wait_for(client.send(req, stream=True), timeout=15.0)
+                        response = await asyncio.wait_for(client.send(req, stream=True), timeout=read_t)
                     except TimeoutError as t_err:
                         await client.aclose()
-                        raise httpx.ReadTimeout(f"Upstream HTTP response headers timeout (>15s) from {base_url}") from t_err
+                        raise httpx.ReadTimeout(f"Upstream HTTP response headers timeout (>{read_t}s) from {base_url}") from t_err
 
                     if response.status_code in (429, 401) and provider_part_check == "nvidia_nim" and len(candidate_keys) > 1:
                         error_bytes = await response.aread()
@@ -197,7 +197,7 @@ class OpenAICompatibleProvider(BaseProvider):
                         response.raise_for_status()
 
                     self._last_stream_headers = dict(response.headers)
-                    return self._stream_response_generator(client, response, chunk_timeout=20.0)
+                    return self._stream_response_generator(client, response, chunk_timeout=read_t)
                 else:
                     try:
                         res_body, res_headers = await self._non_stream_request(
@@ -236,8 +236,9 @@ class OpenAICompatibleProvider(BaseProvider):
             raise last_exc
 
     async def _stream_response_generator(
-        self, client: httpx.AsyncClient, response: httpx.Response, chunk_timeout: float = 20.0
+        self, client: httpx.AsyncClient, response: httpx.Response, chunk_timeout: float = 120.0
     ) -> AsyncGenerator[dict[str, Any], None]:
+
         """Yield OpenAI SSE chunks from an established stream response with an active idle timeout."""
         try:
             line_iter = response.aiter_lines().__aiter__()
