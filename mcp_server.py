@@ -15,20 +15,16 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from api.mcp import MCP_TOOLS_DEFINITIONS, execute_mcp_tool
 
+if hasattr(sys.stdin, "reconfigure"):
+    sys.stdin.reconfigure(line_buffering=True)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
 
-async def run_stdio_mcp_server() -> None:
+
+def run_stdio_mcp_server() -> None:
     """Read JSON-RPC messages line-by-line from stdin and respond on stdout."""
-    loop = asyncio.get_running_loop()
-    reader = asyncio.StreamReader()
-    protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
-
-    while True:
-        line_bytes = await reader.readline()
-        if not line_bytes:
-            break
-
-        line = line_bytes.decode("utf-8").strip()
+    for line in sys.stdin:
+        line = line.strip()
         if not line:
             continue
 
@@ -71,7 +67,7 @@ async def run_stdio_mcp_server() -> None:
         elif method == "tools/call":
             tool_name = params.get("name", "")
             arguments = params.get("arguments", {}) or {}
-            tool_res = await execute_mcp_tool(tool_name, arguments)
+            tool_res = asyncio.run(execute_mcp_tool(tool_name, arguments))
             resp = {
                 "jsonrpc": "2.0",
                 "id": req_id,
@@ -90,6 +86,6 @@ async def run_stdio_mcp_server() -> None:
 
 if __name__ == "__main__":
     try:
-        asyncio.run(run_stdio_mcp_server())
+        run_stdio_mcp_server()
     except (KeyboardInterrupt, SystemExit):
         pass
