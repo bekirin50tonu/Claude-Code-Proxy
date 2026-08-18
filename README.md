@@ -48,7 +48,7 @@ claude-code-proxy/
   - **`ModelSelector` & Resilience:** Models kataloğuna göre primary ve fallback modelleri yönetir, Circuit Breaker ve Rate Limiter durumlarına göre otomatik model değiştirir.
   - **`core.gateway`:** FastAPI `/v1/messages`, `/v1/models` ve `/v1/messages/count_tokens` uç noktaları.
   - **Sağlayıcı Bazlı Canlı RPM & TPM Metrikleri:** 12 LLM sağlayıcısının tamamı için dakikalık istek (RPM) ve token (TPM) kullanımı 60s pencerede canlı takip edilir.
-  - **Hermes Agent İçin MCP (Model Context Protocol) Sunucusu (`api/mcp.py` & `mcp_server.py`):** HTTP/SSE ve Stdio JSON-RPC 2.0 üzerinden model listeleme (`get_models`), model hedefi değiştirme (`set_model_mapping`), sistem/sağlayıcı ayarları okuma/güncelleme (`get_system_config`, `update_system_config`), canlı metrikler (`get_metrics`) ve devre kesici yönetimi (`control_circuit_breaker`).
+  - **Hermes Agent İçin MCP (Model Context Protocol) Sunucusu (`api/mcp.py` & `mcp_server.py`):** HTTP/SSE ve Stdio JSON-RPC 2.0 üzerinden 9 yönetim aracı: `get_models`, `set_model_mapping`, `get_system_config`, `update_system_config`, `get_metrics`, `get_throttle_metrics`, `update_throttle_settings`, `get_model_routing`, ve `control_circuit_breaker`.
 
 ---
 
