@@ -84,9 +84,9 @@ class SSEBaseEvent(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     def to_sse(self) -> str:
-        """Serialize event object to SSE formatted string event: <type>\\ndata: <json>\\n\\n."""
+        """Serialize event object to SSE formatted string event: <type>\ndata: <json>\n\n."""
         data_dict = self.model_dump(by_alias=True, exclude_none=True)
-        event_name = data_dict.pop("type", getattr(self, "event_type", "message"))
+        event_name = data_dict.get("type", getattr(self, "event_type", "message"))
         return f"event: {event_name}\ndata: {json.dumps(data_dict)}\n\n"
 
 
