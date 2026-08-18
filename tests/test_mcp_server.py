@@ -194,6 +194,67 @@ def test_mcp_tool_call_control_circuit_breaker(client: TestClient) -> None:
     assert "reset" in content[0]["text"]
 
 
+def test_mcp_tool_call_get_throttle_metrics(client: TestClient) -> None:
+    req = {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {
+            "name": "get_throttle_metrics",
+            "arguments": {},
+        },
+    }
+    resp = client.post("/mcp", json=req)
+    assert resp.status_code == 200
+    data = resp.json()
+    result = data.get("result", {})
+    content = result.get("content", [])
+    assert len(content) > 0
+    assert "throttle_telemetry" in content[0]["text"]
+    assert "active_sleep_threshold" in content[0]["text"]
+
+
+def test_mcp_tool_call_update_throttle_settings(client: TestClient) -> None:
+    req = {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "tools/call",
+        "params": {
+            "name": "update_throttle_settings",
+            "arguments": {
+                "max_sleep_threshold": 2.5,
+                "max_queue_wait": 20.0,
+            },
+        },
+    }
+    resp = client.post("/mcp", json=req)
+    assert resp.status_code == 200
+    data = resp.json()
+    result = data.get("result", {})
+    content = result.get("content", [])
+    assert len(content) > 0
+    assert "2.5" in content[0]["text"]
+
+
+def test_mcp_tool_call_get_model_routing(client: TestClient) -> None:
+    req = {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/call",
+        "params": {
+            "name": "get_model_routing",
+            "arguments": {},
+        },
+    }
+    resp = client.post("/mcp", json=req)
+    assert resp.status_code == 200
+    data = resp.json()
+    result = data.get("result", {})
+    content = result.get("content", [])
+    assert len(content) > 0
+    assert "client_mappings" in content[0]["text"]
+
+
 def test_mcp_sse_endpoint(client: TestClient) -> None:
     resp = client.get("/mcp/sse")
     assert resp.status_code == 200

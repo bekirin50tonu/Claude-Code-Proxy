@@ -97,6 +97,43 @@ MCP_TOOLS_DEFINITIONS = [
         },
     },
     {
+        "name": "get_throttle_metrics",
+        "description": "Inspect active throttle sleeps, queue delays, max fast-fallback sleep threshold, total sleep time, and API key pool cooldown statuses.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "update_throttle_settings",
+        "description": "Update throttle guard parameters dynamically in-memory and in .env (e.g. max_sleep_threshold fast fallback delay, max_queue_wait timeout budget, rpm_limit).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "max_sleep_threshold": {
+                    "type": "number",
+                    "description": "Maximum seconds allowed for throttle sleep before triggering fast fallback to secondary models (e.g. 2.0 or 3.0).",
+                },
+                "max_queue_wait": {
+                    "type": "number",
+                    "description": "Maximum queue wait budget seconds before raising queue timeout (e.g. 15.0 or 30.0).",
+                },
+                "rpm_limit": {
+                    "type": "integer",
+                    "description": "Safe sliding window RPM limit for rate-limited providers (e.g. 38).",
+                },
+            },
+        },
+    },
+    {
+        "name": "get_model_routing",
+        "description": "Retrieve resolved client-to-target routing mappings matrix (showing which primary or fallback model currently handles Opus, Sonnet, Haiku, Default).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
         "name": "control_circuit_breaker",
         "description": "Manually trip (block/close traffic) or reset (clear/enable traffic) a model's circuit breaker state.",
         "inputSchema": {
@@ -193,6 +230,67 @@ async def execute_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> dict[st
             metrics_resp = await get_dev_metrics()
             metrics_data = json.loads(metrics_resp.body.decode("utf-8"))
             return {"content": [{"type": "text", "text": json.dumps(metrics_data, indent=2)}]}
+
+        elif tool_name == "get_throttle_metrics":
+            from atomic.guards.nim_guard import nim_throttle_guard
+            metrics_resp = await get_dev_metrics()
+            metrics_data = json.loads(metrics_resp.body.decode("utf-8"))
+
+            res = {
+                "throttle_telemetry": metrics_data.get("throttle_telemetry", {}),
+                "nim_telemetry": metrics_data.get("nim_telemetry", {}),
+                "active_sleep_threshold": nim_throttle_guard.max_sleep_threshold,
+                "max_queue_wait": nim_throttle_guard.max_queue_wait,
+                "rpm_limit": nim_throttle_guard.rpm_limit,
+            }
+            return {"content": [{"type": "text", "text": json.dumps(res, indent=2)}]}
+
+        elif tool_name == "update_throttle_settings":
+            from atomic.guards.nim_guard import nim_throttle_guard
+            max_sleep = arguments.get("max_sleep_threshold")
+            max_queue = arguments.get("max_queue_wait")
+            rpm = arguments.get("rpm_limit")
+
+            updated_fields = {}
+            if max_sleep is not None and isinstance(max_sleep, (int, float)):
+                nim_throttle_guard.max_sleep_threshold = float(max_sleep)
+                updated_fields["max_sleep_threshold"] = nim_throttle_guard.max_sleep_threshold
+
+            if max_queue is not None and isinstance(max_queue, (int, float)):
+                nim_throttle_guard._max_queue_wait = float(max_queue)
+                updated_fields["max_queue_wait"] = nim_throttle_guard.max_queue_wait
+
+            if rpm is not None and isinstance(rpm, int):
+                nim_throttle_guard._rpm_limit = rpm
+                updated_fields["rpm_limit"] = nim_throttle_guard.rpm_limit
+                from api.dashboard import ConfigSaveRequest
+                await save_config(ConfigSaveRequest(configs={"PROVIDER_NVIDIA_NIM_RPM": rpm}))
+
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(
+                            {
+                                "status": "success",
+                                "message": f"Throttle settings updated successfully: {updated_fields}",
+                                "current_settings": {
+                                    "max_sleep_threshold": nim_throttle_guard.max_sleep_threshold,
+                                    "max_queue_wait": nim_throttle_guard.max_queue_wait,
+                                    "rpm_limit": nim_throttle_guard.rpm_limit,
+                                },
+                            },
+                            indent=2,
+                        ),
+                    }
+                ]
+            }
+
+        elif tool_name == "get_model_routing":
+            from api.dashboard import get_router_status
+            routing_resp = await get_router_status()
+            routing_data = json.loads(routing_resp.body.decode("utf-8"))
+            return {"content": [{"type": "text", "text": json.dumps(routing_data, indent=2)}]}
 
         elif tool_name == "control_circuit_breaker":
             model_id = arguments.get("model_id", "")
