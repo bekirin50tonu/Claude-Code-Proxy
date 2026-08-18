@@ -164,7 +164,12 @@ class OpenAICompatibleProvider(BaseProvider):
                         headers=headers,
                         json=payload,
                     )
-                    response = await client.send(req, stream=True)
+                    try:
+                        response = await asyncio.wait_for(client.send(req, stream=True), timeout=15.0)
+                    except TimeoutError as t_err:
+                        await client.aclose()
+                        raise httpx.ReadTimeout(f"Upstream HTTP response headers timeout (>15s) from {base_url}") from t_err
+
                     if response.status_code in (429, 401) and provider_part_check == "nvidia_nim" and len(candidate_keys) > 1:
                         error_bytes = await response.aread()
                         await response.aclose()
@@ -191,7 +196,7 @@ class OpenAICompatibleProvider(BaseProvider):
                         response.raise_for_status()
 
                     self._last_stream_headers = dict(response.headers)
-                    return self._stream_response_generator(client, response)
+                    return self._stream_response_generator(client, response, chunk_timeout=20.0)
                 else:
                     try:
                         res_body, res_headers = await self._non_stream_request(
@@ -209,7 +214,7 @@ class OpenAICompatibleProvider(BaseProvider):
                             )
                             continue
                         raise
-            except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadTimeout) as timeout_err:
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadTimeout, TimeoutError) as timeout_err:
                 await client.aclose()
                 last_exc = timeout_err
                 if provider_part_check == "nvidia_nim" and len(candidate_keys) > 1:
@@ -230,11 +235,20 @@ class OpenAICompatibleProvider(BaseProvider):
             raise last_exc
 
     async def _stream_response_generator(
-        self, client: httpx.AsyncClient, response: httpx.Response
+        self, client: httpx.AsyncClient, response: httpx.Response, chunk_timeout: float = 20.0
     ) -> AsyncGenerator[dict[str, Any], None]:
-        """Yield OpenAI SSE chunks from an established stream response."""
+        """Yield OpenAI SSE chunks from an established stream response with an active idle timeout."""
         try:
-            async for line in response.aiter_lines():
+            line_iter = response.aiter_lines().__aiter__()
+            while True:
+                try:
+                    line = await asyncio.wait_for(line_iter.__anext__(), timeout=chunk_timeout)
+                except StopAsyncIteration:
+                    break
+                except TimeoutError as err:
+                    logger.warning("Upstream SSE stream stalled (no data for %.1fs)", chunk_timeout)
+                    raise httpx.ReadTimeout(f"Upstream stream stalled for {chunk_timeout}s") from err
+
                 if not line:
                     continue
                 if line.startswith("data: "):
