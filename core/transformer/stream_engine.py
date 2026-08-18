@@ -191,6 +191,7 @@ class StreamEngine:
         self.current_tool_index: int | None = None
         self.active_tool_id: str | None = None
         self.active_tool_name: str | None = None
+        self.tool_state_map: dict[int, dict[str, Any]] = {}
 
     def _next_block_index(self) -> int:
         self.block_index += 1
@@ -299,7 +300,7 @@ class StreamEngine:
                     yield ev.to_sse()
                 continue
 
-            # 2. Native tool_calls delta
+            # 2. Native tool_calls delta (Isolated state tracking per tc_index for parallel multi-tool execution)
             tool_calls_delta = delta.get("tool_calls") or []
             if tool_calls_delta:
                 self.text_or_tool_emitted = True
@@ -310,43 +311,36 @@ class StreamEngine:
                     tc_name = tc_func.get("name")
                     tc_args = tc_func.get("arguments") or ""
 
-                    if self.current_block_type != "tool_use" or self.current_tool_index != tc_index:
-                        if self.current_block_type is not None:
-                            if self.current_block_type == "tool_use" and self.active_tool_id and self.active_tool_name:
-                                full_args_str = "".join(self.accumulated_tool_args)
-                                parsed_args = safe_parse_json(full_args_str) or {}
-                                if isinstance(parsed_args, dict):
-                                    parsed_args = await self.subagent_guard.enforce_tool_call(
-                                        self.active_tool_name, parsed_args
-                                    )
-                                self.accumulated_tool_calls.append(
-                                    {
-                                        "type": "tool_use",
-                                        "id": self.active_tool_id,
-                                        "name": self.active_tool_name,
-                                        "input": parsed_args,
-                                    }
-                                )
-                                self.accumulated_tool_args = []
-
+                    if tc_index not in self.tool_state_map:
+                        if self.current_block_type in ("text", "thinking"):
                             yield AnthropicSSEFormatter.block_stop(self._get_current_index())
+                            self.current_block_type = None
 
-                        self.current_tool_index = tc_index
-                        self.active_tool_id = tc_id or f"toolu_{uuid.uuid4().hex[:10]}"
-                        self.active_tool_name = tc_name or ""
-                        self.current_block_type = "tool_use"
+                        active_id = tc_id or f"toolu_{uuid.uuid4().hex[:10]}"
+                        active_name = tc_name or ""
+                        blk_idx = self._next_block_index()
 
-                        idx = self._next_block_index()
-                        yield AnthropicSSEFormatter.tool_use_start(idx, self.active_tool_id, self.active_tool_name)
+                        self.tool_state_map[tc_index] = {
+                            "tc_index": tc_index,
+                            "block_index": blk_idx,
+                            "tool_id": active_id,
+                            "tool_name": active_name,
+                            "args": [],
+                            "started": True,
+                            "stopped": False,
+                        }
+                        yield AnthropicSSEFormatter.tool_use_start(blk_idx, active_id, active_name)
                     else:
-                        if tc_id and not self.active_tool_id:
-                            self.active_tool_id = tc_id
-                        if tc_name and not self.active_tool_name:
-                            self.active_tool_name = tc_name
+                        st = self.tool_state_map[tc_index]
+                        if tc_id and not st["tool_id"]:
+                            st["tool_id"] = tc_id
+                        if tc_name and not st["tool_name"]:
+                            st["tool_name"] = tc_name
 
+                    st = self.tool_state_map[tc_index]
                     if tc_args:
-                        self.accumulated_tool_args.append(tc_args)
-                        yield AnthropicSSEFormatter.input_json_delta(tc_args, self._get_current_index())
+                        st["args"].append(tc_args)
+                        yield AnthropicSSEFormatter.input_json_delta(tc_args, st["block_index"])
 
                 finish_reason = "tool_calls"
                 continue
@@ -427,31 +421,35 @@ class StreamEngine:
                 self.text_or_tool_emitted = True
             yield flush_ev.to_sse()
 
-        # Stop active block if open
+        # Stop active text/thinking block if open
         if self.current_block_type is not None:
             yield AnthropicSSEFormatter.block_stop(self._get_current_index())
             self.current_block_type = None
 
-        # Finalize active native tool call
-        if self.active_tool_id and self.active_tool_name:
-            full_args_str = "".join(self.accumulated_tool_args)
+        # Finalize and stop active native tool call blocks per tc_index
+        for tc_idx, st in sorted(self.tool_state_map.items()):
+            if not st["stopped"]:
+                yield AnthropicSSEFormatter.block_stop(st["block_index"])
+                st["stopped"] = True
+
+            full_args_str = "".join(st["args"])
             parsed_args = safe_parse_json(full_args_str) or {}
 
             if isinstance(parsed_args, dict):
-                parsed_args = await self.subagent_guard.enforce_tool_call(self.active_tool_name, parsed_args)
+                parsed_args = await self.subagent_guard.enforce_tool_call(st["tool_name"], parsed_args)
 
             self.accumulated_tool_calls.append(
                 {
                     "type": "tool_use",
-                    "id": self.active_tool_id,
-                    "name": self.active_tool_name,
+                    "id": st["tool_id"],
+                    "name": st["tool_name"],
                     "input": parsed_args,
                 }
             )
             import asyncio
 
             from bot.live_bridge import live_bridge_manager
-            asyncio.create_task(live_bridge_manager.dispatch_tool_call(self.session.session_id, self.active_tool_name, parsed_args))
+            asyncio.create_task(live_bridge_manager.dispatch_tool_call(self.session.session_id, st["tool_name"], parsed_args))
             self.text_or_tool_emitted = True
 
         # Extract embedded JSON tool calls from accumulated text if no native tool calls were present

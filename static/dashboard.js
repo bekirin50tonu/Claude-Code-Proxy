@@ -965,6 +965,57 @@ async function fetchDevMetrics() {
             }
         }
 
+        const th = data.throttle_telemetry || {};
+        const elThBadge = document.getElementById('metrics-throttle-active-badge');
+        if (elThBadge) {
+            const activeCount = th.active_sleep_count || 0;
+            if (activeCount > 0) {
+                elThBadge.innerText = `${activeCount} ACTIVE SLEEPING REQUESTS`;
+                elThBadge.style.color = '#f87171';
+                elThBadge.style.background = 'rgba(248, 113, 113, 0.15)';
+                elThBadge.style.borderColor = 'rgba(248, 113, 113, 0.3)';
+            } else {
+                elThBadge.innerText = '0 ACTIVE SLEEPS';
+                elThBadge.style.color = '#4ade80';
+                elThBadge.style.background = 'rgba(74, 222, 128, 0.1)';
+                elThBadge.style.borderColor = 'rgba(74, 222, 128, 0.3)';
+            }
+        }
+
+        const elThTotalReqs = document.getElementById('throttle-total-reqs');
+        if (elThTotalReqs) elThTotalReqs.innerText = (th.total_throttled_requests || 0).toLocaleString();
+
+        const elThTotalSec = document.getElementById('throttle-total-seconds');
+        if (elThTotalSec) elThTotalSec.innerText = `${(th.total_sleep_time_seconds || 0).toFixed(1)}s`;
+
+        const elThMaxThresh = document.getElementById('throttle-max-threshold');
+        if (elThMaxThresh) elThMaxThresh.innerText = `${(th.max_sleep_threshold || 3.0).toFixed(1)}s`;
+
+        const elThLastEv = document.getElementById('throttle-last-event');
+        if (elThLastEv) {
+            if (th.last_sleep_event) {
+                const le = th.last_sleep_event;
+                elThLastEv.innerHTML = `<span style="color: #fbbf24;">${escapeHtml(le.timestamp || '')}</span> <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.68rem;">(${le.sleep_seconds}s)</span>`;
+            } else {
+                elThLastEv.innerText = 'None';
+            }
+        }
+
+        const elThActiveContainer = document.getElementById('throttle-active-sleeps-container');
+        if (elThActiveContainer) {
+            const activeSleeps = th.active_sleeps || [];
+            if (activeSleeps.length === 0) {
+                elThActiveContainer.innerHTML = `<div style="color: var(--text-dim); font-size: 0.72rem;">No requests currently throttled or sleeping. Fast fallback threshold is active at <strong style="color: #34d399;">${th.max_sleep_threshold || 3.0}s</strong>.</div>`;
+            } else {
+                elThActiveContainer.innerHTML = activeSleeps.map(s => {
+                    return `<div style="background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.3); border-radius: 4px; padding: 0.5rem 0.75rem; margin-top: 0.4rem; display: flex; justify-content: space-between; align-items: center;">
+                        <span><strong style="color: #f87171;">⏳ Sleeping:</strong> <span style="color: white; font-family: 'JetBrains Mono', monospace;">${escapeHtml(s.model_name)}</span></span>
+                        <span style="font-family: 'JetBrains Mono', monospace; color: #fbbf24;">Elapsed: ${s.elapsed_seconds}s / Needed: ${s.sleep_needed}s (Rem: ${s.remaining_seconds}s)</span>
+                    </div>`;
+                }).join('');
+            }
+        }
+
         const pGrid = document.getElementById('provider-metrics-grid');
         if (pGrid && Array.isArray(data.provider_metrics)) {
             const providerLabels = {

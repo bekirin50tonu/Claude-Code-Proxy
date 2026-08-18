@@ -484,6 +484,35 @@
                             </div>
                         </div>
 
+                        <!-- Active Throttle Sleep & Fast Fallback Telemetry Card -->
+                        <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                                <h3 style="font-size: 0.85rem; font-weight: 700; color: white; text-transform: uppercase; letter-spacing: 0.5px;">Active Throttle Sleep &amp; Queue Delay Telemetry</h3>
+                                <span id="metrics-throttle-active-badge" style="font-size: 0.7rem; font-weight: 700; color: #4ade80; background: rgba(74, 222, 128, 0.1); border: 1px solid rgba(74, 222, 128, 0.3); padding: 2px 8px; border-radius: 4px;">0 ACTIVE SLEEPS</span>
+                            </div>
+                            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 0.75rem;">
+                                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 0.75rem; text-align: center;">
+                                    <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase;">Total Throttled Reqs</div>
+                                    <div id="throttle-total-reqs" style="font-size: 1.1rem; font-weight: 700; color: #fbbf24; font-family: 'JetBrains Mono', monospace;">0</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 0.75rem; text-align: center;">
+                                    <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase;">Total Sleep Duration</div>
+                                    <div id="throttle-total-seconds" style="font-size: 1.1rem; font-weight: 700; color: #60a5fa; font-family: 'JetBrains Mono', monospace;">0.0s</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 0.75rem; text-align: center;">
+                                    <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase;">Max Sleep Threshold</div>
+                                    <div id="throttle-max-threshold" style="font-size: 1.1rem; font-weight: 700; color: #34d399; font-family: 'JetBrains Mono', monospace;">3.0s</div>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 0.75rem; text-align: center;">
+                                    <div style="font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase;">Last Sleep Event</div>
+                                    <div id="throttle-last-event" style="font-size: 0.75rem; font-weight: 600; color: var(--text-dim); margin-top: 4px;">None</div>
+                                </div>
+                            </div>
+                            <div id="throttle-active-sleeps-container" style="font-size: 0.75rem; color: var(--text-muted);">
+                                <!-- Active sleep details rendered dynamically by JS -->
+                            </div>
+                        </div>
+
                         <!-- Per-Provider RPM & TPM Fundamental Telemetry Matrix -->
                         <div style="background: #050608; border: 1px solid var(--border-subtle); border-radius: 8px; padding: 1.25rem; margin-bottom: 1.5rem;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">

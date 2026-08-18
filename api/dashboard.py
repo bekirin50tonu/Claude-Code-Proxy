@@ -950,6 +950,14 @@ async def get_dev_metrics() -> JSONResponse:
                 "passive_keys": len(passive_keys),
                 "key_details": key_details,
             },
+            "throttle_telemetry": {
+                "total_throttled_requests": nim_throttle_guard.total_throttled_requests,
+                "total_sleep_time_seconds": round(nim_throttle_guard.total_sleep_time_seconds, 2),
+                "active_sleep_count": len(nim_throttle_guard.get_active_sleeps()),
+                "active_sleeps": nim_throttle_guard.get_active_sleeps(),
+                "last_sleep_event": nim_throttle_guard.last_sleep_event,
+                "max_sleep_threshold": nim_throttle_guard.max_sleep_threshold,
+            },
             "provider_metrics": provider_metrics,
             "model_metrics": list(model_stats.values()),
         }
