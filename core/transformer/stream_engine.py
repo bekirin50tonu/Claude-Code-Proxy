@@ -82,11 +82,16 @@ def _find_balanced_json_objects(text: str) -> list[tuple[int, int]]:
     return results
 
 
-def _parse_tool_from_json(obj: dict[str, Any]) -> dict[str, Any] | None:
+def _parse_tool_from_json(
+    obj: dict[str, Any],
+    allowed_names: set[str] | None = None,
+) -> dict[str, Any] | None:
     """If *obj* looks like a tool call dict return a ``tool_use`` block."""
     if "name" not in obj or not isinstance(obj["name"], str):
         return None
     name: str = obj["name"]
+    if allowed_names is not None and name not in allowed_names:
+        return None
     input_data = (
         obj.get("parameters")
         or obj.get("arguments")
@@ -105,10 +110,22 @@ def _parse_tool_from_json(obj: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def extract_all_json_tool_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
+def extract_all_json_tool_calls(
+    text: str,
+    allowed_tools: list[dict[str, Any]] | list[str] | set[str] | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
     """Extract all JSON tool-call structures embedded in text."""
     if not text:
         return text, []
+
+    allowed_names: set[str] | None = None
+    if allowed_tools is not None:
+        allowed_names = set()
+        for item in allowed_tools:
+            if isinstance(item, str):
+                allowed_names.add(item)
+            elif isinstance(item, dict) and "name" in item and isinstance(item["name"], str):
+                allowed_names.add(item["name"])
 
     cleaned = re.sub(r"```(?:json|JSON)?\s*\n?", "", text)
     spans = _find_balanced_json_objects(cleaned)
@@ -123,7 +140,7 @@ def extract_all_json_tool_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
         parsed = safe_parse_json(json_str)
         if not isinstance(parsed, dict):
             continue
-        tool_block = _parse_tool_from_json(parsed)
+        tool_block = _parse_tool_from_json(parsed, allowed_names=allowed_names)
         if tool_block is not None:
             tools.append(tool_block)
             remove_ranges.append((start, end))
@@ -144,12 +161,16 @@ def extract_all_json_tool_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
     return remaining, tools
 
 
-def extract_json_tool_call(text: str) -> tuple[str, dict[str, Any] | None]:
+def extract_json_tool_call(
+    text: str,
+    allowed_tools: list[dict[str, Any]] | list[str] | set[str] | None = None,
+) -> tuple[str, dict[str, Any] | None]:
     """Return the first extracted tool call from text."""
-    remaining, tools = extract_all_json_tool_calls(text)
+    remaining, tools = extract_all_json_tool_calls(text, allowed_tools=allowed_tools)
     if tools:
         return remaining, tools[0]
     return text, None
+
 
 
 def translate_non_stream_response(openai_resp: dict[str, Any]) -> dict[str, Any]:
@@ -177,8 +198,9 @@ class StreamEngine:
         self.preemptive_text_emitted = False
 
         self.thinking_parser = ThinkingStatefulParser(block_index_provider=self._next_block_index)
-        self.heuristic_tool_parser = HeuristicToolStatefulParser(block_index_provider=self._next_block_index)
+        self.heuristic_tool_parser = HeuristicToolStatefulParser(block_index_provider=self._next_block_index, tools=self.tools)
         self.subagent_guard = SubagentGuard()
+
 
         self.accumulated_thinking: list[str] = []
         self.accumulated_text: list[str] = []
@@ -316,6 +338,10 @@ class StreamEngine:
                             yield AnthropicSSEFormatter.block_stop(self._get_current_index())
                             self.current_block_type = None
 
+                        for close_ev in self.thinking_parser.close_active_block():
+                            yield close_ev.to_sse()
+
+
                         active_id = tc_id or f"toolu_{uuid.uuid4().hex[:10]}"
                         active_name = tc_name or ""
                         blk_idx = self._next_block_index()
@@ -427,7 +453,7 @@ class StreamEngine:
             self.current_block_type = None
 
         # Finalize and stop active native tool call blocks per tc_index
-        for tc_idx, st in sorted(self.tool_state_map.items()):
+        for _tc_idx, st in sorted(self.tool_state_map.items()):
             if not st["stopped"]:
                 yield AnthropicSSEFormatter.block_stop(st["block_index"])
                 st["stopped"] = True
@@ -455,7 +481,8 @@ class StreamEngine:
         # Extract embedded JSON tool calls from accumulated text if no native tool calls were present
         if not self.accumulated_tool_calls:
             full_streamed_text = "".join(self.accumulated_text)
-            _rem, extracted_tools = extract_all_json_tool_calls(full_streamed_text)
+            _rem, extracted_tools = extract_all_json_tool_calls(full_streamed_text, allowed_tools=self.tools)
+
             if extracted_tools:
                 for tool in extracted_tools:
                     tool["input"] = await self.subagent_guard.enforce_tool_call(tool["name"], tool.get("input", {}))

@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from typing import Any
+
 from loguru import logger
 
 from config import settings

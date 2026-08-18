@@ -18,7 +18,6 @@ from api.dashboard import (
     get_available_models,
     get_config,
     get_dev_metrics,
-    get_key_statuses,
     handle_circuit_breaker_action,
     save_config,
     toggle_subagents_setting,
@@ -349,10 +348,7 @@ async def handle_mcp_request(req: Request) -> JSONResponse:
             }
         )
 
-    elif method in ("notifications/initialized", "initialized"):
-        return JSONResponse(content={"jsonrpc": "2.0", "id": req_id, "result": {}})
-
-    elif method == "ping":
+    elif method in ("notifications/initialized", "initialized") or method == "ping":
         return JSONResponse(content={"jsonrpc": "2.0", "id": req_id, "result": {}})
 
     elif method == "tools/list":

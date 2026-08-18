@@ -165,7 +165,10 @@ class ModelConverter:
         return openai_msgs
 
     @staticmethod
-    def openai_to_anthropic_response(openai_resp: dict[str, Any]) -> dict[str, Any]:
+    def openai_to_anthropic_response(
+        openai_resp: dict[str, Any],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """Convert standard OpenAI Chat Completions response to Anthropic Message response dict."""
         choices = openai_resp.get("choices", [])
         if not choices:
@@ -207,7 +210,6 @@ class ModelConverter:
                 )
             )
 
-
         has_tool_block = False
         if tool_calls:
             if text_content:
@@ -233,7 +235,8 @@ class ModelConverter:
         elif text_content:
             from core.transformer.stream_engine import extract_all_json_tool_calls
 
-            remaining, parsed_tools = extract_all_json_tool_calls(text_content)
+            remaining, parsed_tools = extract_all_json_tool_calls(text_content, allowed_tools=tools)
+
             if parsed_tools:
                 if remaining:
                     blocks.append(AnthropicContentBlock(type="text", text=remaining))

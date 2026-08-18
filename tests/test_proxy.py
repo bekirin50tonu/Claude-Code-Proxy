@@ -1092,5 +1092,127 @@ def test_synthetic_tool_call_injection_verification_turn() -> None:
     assert tool_msg["content"] == "file1.txt\nfile2.txt"
 
 
+def test_extract_all_json_tool_calls_with_allowed_tools_filtering() -> None:
+    """Test that arbitrary JSON in text (e.g. non-tool dicts) is ignored when allowed_tools filter is set."""
+    llm_text = (
+        'Here is the component config: ```json\n{"name": "ReactComponent", "version": "1.0.0"}\n``` '
+        'And here is a real tool call: ```json\n{"name": "view_file", "parameters": {"path": "main.py"}}\n```'
+    )
+    allowed = [{"name": "view_file"}, {"name": "run_command"}]
+    remaining, tools = extract_all_json_tool_calls(llm_text, allowed_tools=allowed)
+    assert len(tools) == 1
+    assert tools[0]["name"] == "view_file"
+    assert tools[0]["input"] == {"path": "main.py"}
+    assert "ReactComponent" in remaining
+
+
+@pytest.mark.asyncio
+async def test_heuristic_tool_parser_with_allowed_tools() -> None:
+    """Test that HeuristicToolParser ignores tools not present in allowed_tools."""
+    from atomic.parsers.heuristic_tool import HeuristicToolParser
+
+    parser = HeuristicToolParser(tools=[{"name": "view_file"}])
+
+    # Bash fence when run_command/Bash is NOT in allowed_tools -> returns no events
+    events = await parser.process_chunk("```bash\nls -la\n```")
+    assert len(events) == 0
+
+    # JSON fence for unallowed tool -> returns no events
+    parser.reset()
+    events_unallowed = await parser.process_chunk('```json\n{"name": "unknown_tool", "input": {}}\n```')
+    assert len(events_unallowed) == 0
+
+    # JSON fence for allowed tool -> returns tool_use block events
+    parser.reset()
+    events_allowed = await parser.process_chunk('```json\n{"name": "view_file", "parameters": {"path": "test.py"}}\n```')
+    assert len(events_allowed) > 0
+    assert any(getattr(getattr(ev, "content_block", None), "name", None) == "view_file" for ev in events_allowed)
+
+
+def test_openai_to_anthropic_response_with_allowed_tools() -> None:
+    """Test that translate_non_stream_response honors allowed tools and does not invent tool_use for non-tool JSON."""
+    from models.converter import ModelConverter
+
+    openai_resp = {
+        "id": "chatcmpl-test",
+        "model": "llama-3.1",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": 'Configuration output:\n```json\n{"name": "ConfigObject", "type": "setting"}\n```',
+                },
+                "finish_reason": "stop",
+            }
+        ],
+    }
+
+    # Pass allowed tools that do NOT include ConfigObject
+    translated = ModelConverter.openai_to_anthropic_response(openai_resp, tools=[{"name": "run_command"}])
+    assert translated["stop_reason"] == "end_turn"
+    assert len(translated["content"]) == 1
+    assert translated["content"][0]["type"] == "text"
+    assert "ConfigObject" in translated["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_stream_guard_resilience_to_consecutive_empty_chunks() -> None:
+    """Test StreamGuard allows up to 300 consecutive empty/keepalive chunks during quiet reasoning without killing the stream."""
+    from atomic.guards.stream_guard import StreamGuard
+
+    async def mock_stream_with_empty_lines():
+        # 15 consecutive empty chunks (previously tripped at 10)
+        for _ in range(15):
+            yield ""
+        yield 'event: content_block_delta\ndata: {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hello"}}\n\n'
+
+    guard = StreamGuard(mock_stream_with_empty_lines(), max_empty_chunks=300)
+    received = [chunk async for chunk in guard]
+    # Verify stream did NOT terminate with error event
+    assert not any("event: error" in c for c in received)
+    assert any("hello" in c for c in received)
+
+
+@pytest.mark.asyncio
+async def test_stream_engine_sequential_thinking_and_tool_call_block_closing() -> None:
+    """Test StreamEngine closes active thinking block (index 0) BEFORE starting native tool_use block (index 1)."""
+    from core.transformer.stream_engine import StreamEngine
+
+    engine = StreamEngine(target_model="llama-3.1")
+
+    async def mock_thinking_then_tool_stream():
+        # Chunks streaming thinking content first
+        yield {"choices": [{"delta": {"content": "<think>Analyzing repository structure..."}}]}
+        yield {"choices": [{"delta": {"content": "</think>"}}]}
+        # Followed by native tool call
+        yield {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "toolu_read1",
+                                "type": "function",
+                                "function": {"name": "view_file", "arguments": '{"path": "next.config.ts"}'},
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        yield {"choices": [{"finish_reason": "tool_calls"}]}
+
+    events = [ev async for ev in engine.transform_stream(mock_thinking_then_tool_stream())]
+    full_text = "".join(events)
+
+    # Verify thinking start/delta, thinking stop for index 0, THEN tool_use start for index 1
+    assert "event: content_block_start" in full_text
+    assert '"type": "thinking"' in full_text
+    assert '"type": "tool_use"' in full_text
+
+
+
+
 
 

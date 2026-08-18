@@ -1,9 +1,9 @@
 """Comprehensive unit and integration tests for MCP Server HTTP/SSE endpoints, JSON-RPC tools, and Stdio process transport."""
 
-import asyncio
 import json
 import subprocess
 import sys
+
 import pytest
 from fastapi.testclient import TestClient
 

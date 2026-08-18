@@ -2,8 +2,9 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from server import app
+
 from atomic.guards.subagent import SubagentGuard
+from server import app
 
 
 @pytest.fixture

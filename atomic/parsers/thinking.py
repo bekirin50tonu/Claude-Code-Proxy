@@ -44,6 +44,13 @@ class ThinkingParser(BaseAtomicParser):
             self.active_block_type = None
             self.current_block_index = None
 
+    def close_active_block(self) -> list[SSEBaseEvent]:
+        """Close any currently active thinking or text block explicitly."""
+        events: list[SSEBaseEvent] = []
+        self._close_block(events)
+        return events
+
+
     async def process_chunk(self, chunk: dict[str, Any] | str) -> list[SSEBaseEvent]:
         events: list[SSEBaseEvent] = []
 

@@ -1,9 +1,9 @@
 """Unit tests for NimKeyManager round-robin rotation, passive cooldown tracking, and silent failover."""
 
 import pytest
-import time
-from core.key_manager import NimKeyManager
+
 from config import settings
+from core.key_manager import NimKeyManager
 
 
 @pytest.fixture

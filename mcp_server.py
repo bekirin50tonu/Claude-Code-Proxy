@@ -6,6 +6,7 @@ and outputs JSON-RPC 2.0 responses to stdout.
 """
 
 import asyncio
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -85,7 +86,7 @@ def run_stdio_mcp_server() -> None:
 
 
 if __name__ == "__main__":
-    try:
+    with contextlib.suppress(KeyboardInterrupt, SystemExit):
         run_stdio_mcp_server()
-    except (KeyboardInterrupt, SystemExit):
-        pass
+
+

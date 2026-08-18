@@ -1,7 +1,7 @@
 """Async In-Memory Queue Manager for Remote Prompt Interception & Payload Injection."""
 
 import asyncio
-from typing import Any
+
 from loguru import logger
 
 

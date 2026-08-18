@@ -27,8 +27,8 @@ class StreamGuard:
     def __init__(
         self,
         source: AsyncGenerator[str, None],
-        stream_timeout: float = 30.0,
-        max_empty_chunks: int = 10,
+        stream_timeout: float = 120.0,
+        max_empty_chunks: int = 300,
     ) -> None:
         self._source = source
         self._timeout = stream_timeout
@@ -85,9 +85,10 @@ GuardedStream = AsyncGenerator[str, None]
 
 def guarded(
     source: AsyncGenerator[str, None],
-    stream_timeout: float = 30.0,
-    max_empty_chunks: int = 10,
+    stream_timeout: float = 120.0,
+    max_empty_chunks: int = 300,
 ) -> GuardedStream:
     """Shorthand factory for StreamGuard.__aiter__."""
     guard = StreamGuard(source, stream_timeout, max_empty_chunks)
     return guard.__aiter__()
+

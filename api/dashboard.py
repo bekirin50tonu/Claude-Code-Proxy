@@ -874,11 +874,12 @@ async def get_dev_metrics() -> JSONResponse:
     for p in PROVIDER_DEFAULTS:
         p_cfg = settings.get_provider_config(p)
 
-        def _match_provider(log_entry: Any) -> bool:
+        def _match_provider(log_entry: Any, prov: str = p) -> bool:
             mid = (getattr(log_entry, "mapped_model", "") or "").lower()
-            if p == "open_router":
+            if prov == "open_router":
                 return mid.startswith("open_router/") or mid.startswith("openrouter/")
-            return mid.startswith(f"{p}/")
+            return mid.startswith(f"{prov}/")
+
 
         p_logs_60s = [log for log in logs_last_60s if _match_provider(log)]
         p_logs_all = [log for log in recent_logs if _match_provider(log)]

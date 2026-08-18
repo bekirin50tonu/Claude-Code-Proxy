@@ -11,7 +11,7 @@ from shared.schemas.anthropic import SSEBaseEvent
 class SubagentGuard(BaseAtomicParser):
     """Guard enforcing run_in_background=False for task/subagent tool requests in CLI sessions."""
 
-    TASK_TOOL_NAMES = {"Task", "subagent", "TaskManager", "TaskWorker", "agent_task", "run_task"}
+    TASK_TOOL_NAMES = {"Agent", "Task", "subagent", "Explore", "TaskManager", "TaskWorker", "agent_task", "run_task"}
 
     def __init__(self):
         self.enforcements_count = 0
@@ -34,11 +34,10 @@ class SubagentGuard(BaseAtomicParser):
             except Exception:
                 enabled = True
 
-        if not enabled:
-            if (tool_name in self.TASK_TOOL_NAMES or "task" in tool_name.lower()) and tool_input.get("run_in_background") is not False:
-                logger.warning("SubagentGuard (OFF Bypass): Enforcing run_in_background=False on subagent tool '{}'", tool_name)
-                tool_input["run_in_background"] = False
-                self.enforcements_count += 1
+        if not enabled and (tool_name in self.TASK_TOOL_NAMES or "task" in tool_name.lower() or "agent" in tool_name.lower()) and tool_input.get("run_in_background") is not False:
+            logger.warning("SubagentGuard (OFF Bypass): Enforcing run_in_background=False on subagent tool '{}'", tool_name)
+            tool_input["run_in_background"] = False
+            self.enforcements_count += 1
 
         return tool_input
 
@@ -69,12 +68,11 @@ class SubagentGuard(BaseAtomicParser):
                         if isinstance(block, dict) and block.get("type") == "tool_use":
                             tool_input = block.get("input")
                             tool_name = block.get("name", "")
-                            if isinstance(tool_input, dict):
-                                if "run_in_background" in tool_input or tool_name in self.TASK_TOOL_NAMES or "task" in tool_name.lower():
-                                    if tool_input.get("run_in_background") is not False:
-                                        logger.warning("SubagentGuard (OFF Bypass): Overriding run_in_background=False for tool '{}'", tool_name)
-                                        tool_input["run_in_background"] = False
-                                        self.enforcements_count += 1
+                            if isinstance(tool_input, dict) and ("run_in_background" in tool_input or tool_name in self.TASK_TOOL_NAMES or "task" in tool_name.lower() or "agent" in tool_name.lower()) and tool_input.get("run_in_background") is not False:
+                                logger.warning("SubagentGuard (OFF Bypass): Overriding run_in_background=False for tool '{}'", tool_name)
+                                tool_input["run_in_background"] = False
+                                self.enforcements_count += 1
+
 
         return body
 
