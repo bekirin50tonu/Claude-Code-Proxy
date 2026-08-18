@@ -965,6 +965,69 @@ async function fetchDevMetrics() {
             }
         }
 
+        const pGrid = document.getElementById('provider-metrics-grid');
+        if (pGrid && Array.isArray(data.provider_metrics)) {
+            const providerLabels = {
+                nvidia_nim: "NVIDIA NIM",
+                open_router: "OpenRouter",
+                gemini: "Google Gemini",
+                groq: "Groq",
+                deepseek: "DeepSeek",
+                mistral: "Mistral / Codestral",
+                cerebras: "Cerebras",
+                fireworks: "Fireworks AI",
+                kimi: "Kimi (Moonshot AI)",
+                lmstudio: "LM Studio (Local)",
+                ollama: "Ollama (Local)",
+                llama_cpp: "llama.cpp (Local)",
+            };
+
+            pGrid.innerHTML = data.provider_metrics.map(pm => {
+                const label = providerLabels[pm.provider] || pm.provider;
+                const rpmBarCol = pm.rpm_usage_pct > 85 ? '#f87171' : (pm.rpm_usage_pct > 60 ? '#facc15' : '#4ade80');
+                const tpmBarCol = pm.tpm_usage_pct > 85 ? '#f87171' : (pm.tpm_usage_pct > 60 ? '#facc15' : '#60a5fa');
+                
+                const statusBg = pm.rpd_exceeded ? 'rgba(248, 113, 113, 0.15)' : (pm.rpm_usage_pct > 85 ? 'rgba(250, 204, 21, 0.15)' : 'rgba(74, 222, 128, 0.1)');
+                const statusCol = pm.rpd_exceeded ? '#f87171' : (pm.rpm_usage_pct > 85 ? '#facc15' : '#4ade80');
+
+                return `
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 0.85rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <strong style="color: white; font-size: 0.8rem;">${escapeHtml(label)}</strong>
+                        <span style="font-size: 0.65rem; font-weight: 700; color: ${statusCol}; background: ${statusBg}; border: 1px solid ${statusCol}44; padding: 1px 6px; border-radius: 3px;">${pm.status}</span>
+                    </div>
+
+                    <!-- Fundamental RPM Gauge -->
+                    <div style="margin-bottom: 0.4rem;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-muted); margin-bottom: 2px;">
+                            <span>RPM (Req/Min):</span>
+                            <strong style="color: white; font-family: 'JetBrains Mono', monospace;">${pm.rpm_60s} / ${pm.rpm_limit} (${pm.rpm_usage_pct}%)</strong>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.06); height: 5px; border-radius: 3px; overflow: hidden;">
+                            <div style="background: ${rpmBarCol}; width: ${Math.min(100, pm.rpm_usage_pct)}%; height: 100%; transition: width 0.3s;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Fundamental TPM Gauge -->
+                    <div style="margin-bottom: 0.5rem;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-muted); margin-bottom: 2px;">
+                            <span>TPM (Tokens/Min):</span>
+                            <strong style="color: white; font-family: 'JetBrains Mono', monospace;">${pm.tpm_60s.toLocaleString()} / ${pm.tpm_limit.toLocaleString()} (${pm.tpm_usage_pct}%)</strong>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.06); height: 5px; border-radius: 3px; overflow: hidden;">
+                            <div style="background: ${tpmBarCol}; width: ${Math.min(100, pm.tpm_usage_pct)}%; height: 100%; transition: width 0.3s;"></div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; font-size: 0.68rem; color: var(--text-dim); border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 0.35rem;">
+                        <span>Today RPD: <strong style="color: white;">${pm.rpd_count}/${pm.rpd_limit}</strong></span>
+                        <span>Timeout: <strong style="color: white;">${pm.http_read_timeout}s</strong></span>
+                        <span>Max Conn: <strong style="color: white;">${pm.max_concurrency}</strong></span>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
         const tbody = document.getElementById('metrics-table-body');
         if (!tbody) return;
 

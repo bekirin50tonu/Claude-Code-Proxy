@@ -23,9 +23,10 @@ claude-code-proxy/
 │   └── transformer/    # StreamEngine (Akış orkestratörü)
 ├── cli/                # Terminal arayüzü ve oturum yönetimi (session.py, main.py)
 ├── config/             # Ayarlar (.env) ve model kataloğu (models.yaml)
-├── api/                # Hermes Gate Dashboard & 0-token local mock interceptor
+├── api/                # Hermes Gate Dashboard, MCP Server (api/mcp.py) & 0-token local mock interceptor
 ├── messaging/          # Telegram & Discord bot uzaktan yönetim entegrasyonu
-└── tests/              # 44 adet pytest birim testi
+├── mcp_server.py       # Hermes Agent Stdio MCP sunucusu
+└── tests/              # 99 adet pytest birim testi
 ```
 
 ---
@@ -33,7 +34,7 @@ claude-code-proxy/
 ## 🛠️ Temel Katmanlar ve Özellikler
 
 ### 1. Shared Katmanı (`shared/`)
-- **Durumsuz (Stateless) Yapı:** Hiçbir durum saklamaz. Yalnızca veri veri transfer nesnelerini (DTO) ve saf yardımcı fonksiyonları barındırır.
+- **Durumsuz (Stateless) Yapı:** Hiçbir durum saklamaz. Yalnızca veri transfer nesnelerini (DTO) ve saf yardımcı fonksiyonları barındırır.
 - **Güçlü Hata Hiyerarşisi (`exceptions.py`):** `CircuitOpenError`, `RateLimitExceededError`, `ContextOverflowError`, `SubagentPolicyViolationError`.
 
 ### 2. Atomic Katmanı (`atomic/`)
@@ -41,11 +42,13 @@ claude-code-proxy/
 - **Thinking & Heuristic Tool Parsers:** `<think>` akıl yürütme etiketlerini ve metin içi markdown/JSON komutlarını (`/graphify`, `pnpm dev`, `git status`) `tool_use` event'lerine dönüştürür.
 - **Güvenlik & Bütçe Korumaları:** `PreflightGuard` (1-token erişilebilirlik probe'u), `TokenBudgetGuard` (tiktoken ile context clipping), `SubagentGuard` (`run_in_background=False` zorlaması) ve `StreamGuard` (timeout & stall detector).
 
-### 3. Core Katmanı (`core/`)
+### 3. Core Katmanı (`core/`) & API / MCP Sunucusu
 - **İş Mantığı & Orkestrasyon:**
-- **`StreamEngine`:** Upstream yanıt akışlarını alıp sırasıyla Atomic parser ve guard'lardan geçirir.
-- **`ModelSelector` & Resilience:** Models kataloğuna göre primary ve fallback modelleri yönetir, Circuit Breaker ve Rate Limiter durumlarına göre otomatik model değiştirir.
-- **`core.gateway`:** FastAPI `/v1/messages`, `/v1/models` ve `/v1/messages/count_tokens` uç noktaları.
+  - **`StreamEngine`:** Upstream yanıt akışlarını alıp sırasıyla Atomic parser ve guard'lardan geçirir.
+  - **`ModelSelector` & Resilience:** Models kataloğuna göre primary ve fallback modelleri yönetir, Circuit Breaker ve Rate Limiter durumlarına göre otomatik model değiştirir.
+  - **`core.gateway`:** FastAPI `/v1/messages`, `/v1/models` ve `/v1/messages/count_tokens` uç noktaları.
+  - **Sağlayıcı Bazlı Canlı RPM & TPM Metrikleri:** 12 LLM sağlayıcısının tamamı için dakikalık istek (RPM) ve token (TPM) kullanımı 60s pencerede canlı takip edilir.
+  - **Hermes Agent İçin MCP (Model Context Protocol) Sunucusu (`api/mcp.py` & `mcp_server.py`):** HTTP/SSE ve Stdio JSON-RPC 2.0 üzerinden model listeleme (`get_models`), model hedefi değiştirme (`set_model_mapping`), sistem/sağlayıcı ayarları okuma/güncelleme (`get_system_config`, `update_system_config`), canlı metrikler (`get_metrics`) ve devre kesici yönetimi (`control_circuit_breaker`).
 
 ---
 
@@ -77,6 +80,12 @@ veya doğrudan:
 uv run python server.py
 ```
 
+### 4. Stdio MCP Sunucusunu Başlatın (Hermes Agent Entegrasyonu)
+
+```bash
+uv run python mcp_server.py
+```
+
 ---
 
 ## 💻 Claude Code CLI Entegrasyonu
@@ -99,11 +108,12 @@ claude
 ## 📊 Dashboard ve Teşhis
 
 - **Hermes Gate Control Dashboard UI:** `http://localhost:8090/dashboard`
+- **MCP Sunucu Uç Noktaları:** `http://localhost:8090/mcp` & `http://localhost:8090/mcp/sse`
 - **Sistem Sağlık Teşhisi (Doctor):**
   ```bash
   uv run python cli/main.py doctor
   ```
-- **Birim Testlerini Çalıştırın (44 Test):**
+- **Birim Testlerini Çalıştırın (99 Test):**
   ```bash
   uv run pytest -v
   ```

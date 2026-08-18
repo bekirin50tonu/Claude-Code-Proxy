@@ -867,6 +867,69 @@ async def get_dev_metrics() -> JSONResponse:
     total_latency_sum = sum(log.duration_ms for log in recent_logs)
     global_avg_latency = round(total_latency_sum / len(recent_logs), 1) if recent_logs else 0.0
 
+    from config import PROVIDER_DEFAULTS
+    from core.router.daily_tracker import daily_request_tracker
+
+    provider_metrics: list[dict[str, Any]] = []
+    for p in PROVIDER_DEFAULTS:
+        p_cfg = settings.get_provider_config(p)
+
+        def _match_provider(log_entry: Any) -> bool:
+            mid = (getattr(log_entry, "mapped_model", "") or "").lower()
+            if p == "open_router":
+                return mid.startswith("open_router/") or mid.startswith("openrouter/")
+            return mid.startswith(f"{p}/")
+
+        p_logs_60s = [log for log in logs_last_60s if _match_provider(log)]
+        p_logs_all = [log for log in recent_logs if _match_provider(log)]
+
+        rpm_60s = len(p_logs_60s)
+        tpm_60s = sum(
+            (getattr(log, "input_tokens", 0) or 0) + (getattr(log, "output_tokens", 0) or 0)
+            for log in p_logs_60s
+        )
+        p_429_60s = sum(1 for log in p_logs_60s if getattr(log, "status_code", 200) == 429)
+
+        rpd_exceeded, rpd_count, rpd_limit = daily_request_tracker.is_exceeded(p)
+        rpm_limit = p_cfg.get("rpm", 30)
+        tpm_limit = p_cfg.get("tpm", 200000)
+
+        rpm_pct = round((rpm_60s / rpm_limit) * 100, 1) if rpm_limit > 0 else 0.0
+        tpm_pct = round((tpm_60s / tpm_limit) * 100, 1) if tpm_limit > 0 else 0.0
+        rpd_pct = round((rpd_count / rpd_limit) * 100, 1) if rpd_limit > 0 else 0.0
+
+        p_status = "Healthy"
+        if rpd_exceeded:
+            p_status = "RPD Exceeded"
+        elif rpm_pct >= 90 or tpm_pct >= 90:
+            p_status = "Warning (High Load)"
+        elif p_429_60s > 0:
+            p_status = "Rate Limited (429)"
+
+        provider_metrics.append({
+            "provider": p,
+            "rpm_60s": rpm_60s,
+            "rpm_limit": rpm_limit,
+            "rpm_usage_pct": rpm_pct,
+            "tpm_60s": tpm_60s,
+            "tpm_limit": tpm_limit,
+            "tpm_usage_pct": tpm_pct,
+            "rpd_count": rpd_count,
+            "rpd_limit": rpd_limit,
+            "rpd_exceeded": rpd_exceeded,
+            "rpd_usage_pct": rpd_pct,
+            "rate_window": p_cfg.get("rate_window", 60),
+            "max_concurrency": p_cfg.get("max_concurrency", 5),
+            "context": p_cfg.get("context", 128000),
+            "max_output": p_cfg.get("max_output", 16384),
+            "http_read_timeout": p_cfg.get("http_read_timeout", 120),
+            "http_write_timeout": p_cfg.get("http_write_timeout", 10),
+            "http_connect_timeout": p_cfg.get("http_connect_timeout", 2),
+            "rate_limit_429_60s": p_429_60s,
+            "total_requests": len(p_logs_all),
+            "status": p_status,
+        })
+
     return JSONResponse(
         content={
             "global_metrics": {
@@ -887,6 +950,7 @@ async def get_dev_metrics() -> JSONResponse:
                 "passive_keys": len(passive_keys),
                 "key_details": key_details,
             },
+            "provider_metrics": provider_metrics,
             "model_metrics": list(model_stats.values()),
         }
     )

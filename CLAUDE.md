@@ -22,6 +22,8 @@
 
 - **Transparent Anthropic Proxy**: Intercepts `/v1/messages` requests from `claude-code` or `hermes-claude` CLI and translates them to OpenAI-compatible provider endpoints (NVIDIA NIM, OpenRouter, LM Studio).
 - **Schema-Aware Heuristic MCP & Tool Builder**: Intercepts text-based slash commands (`/graphify`, `/mcp__stitch...`) and shell commands (`pnpm dev`, `git status`) and dynamically constructs valid `tool_use` events adhering to target tool `input_schema`.
+- **MCP Server System for Hermes Agent**: JSON-RPC 2.0 HTTP/SSE (`/mcp`, `/api/mcp/sse`) & Stdio (`mcp_server.py`) interface exposing `get_models`, `set_model_mapping`, `get_system_config`, `update_system_config`, `get_metrics`, and `control_circuit_breaker`.
+- **Per-Provider RPM & TPM Telemetry**: Real-time 60s sliding-window RPM (Requests/Min) and TPM (Tokens/Min) metrics tracking across all 12 supported LLM providers.
 - **Multi-Key Rotation Pool**: Supports round-robin API key selection for comma-separated key lists (`NVIDIA_NIM_API_KEY="key1, key2"`).
 - **Per-Model Thinking Controls**: Configurable reasoning directive modes (`THINKING_MODE_OPUS`, `THINKING_MODE_SONNET`, `THINKING_MODE_HAIKU`, `THINKING_MODE_DEFAULT`) supporting `open`, `inherit`, and `close` states.
 - **Live Dashboard & Telemetry**: Auto-refreshing request trace feed at `/dashboard` with latency tracking (ms), status codes, and `FALLBACK` failover badges.

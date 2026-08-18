@@ -89,9 +89,12 @@ claude-code-proxy/
 │   ├── main.py                   # Typer CLI commands (start server on :8090, doctor diagnostics)
 │   └── session.py                # Subprocess & interactive session manager
 │
-├── api/                          # Interface & Monitoring Layer
-│   ├── dashboard.py              # Hermes Gate Dashboard endpoints (/api/stats, /api/config)
+├── api/                          # Interface, Monitoring & MCP Layer
+│   ├── dashboard.py              # Hermes Gate Dashboard endpoints (/api/stats, /api/config, /api/dev/metrics)
+│   ├── mcp.py                    # Model Context Protocol (MCP) Server endpoints (/mcp, /api/mcp/sse)
 │   └── mock.py                   # Instant 0-token local mock interceptor for probes/titles
+│
+├── mcp_server.py                 # Hermes Agent Stdio MCP transport entrypoint script
 │
 ├── config/                       # Configuration Layer
 │   ├── config.py                 # Central Loguru logging, Pydantic settings loading (.env)
@@ -109,8 +112,10 @@ claude-code-proxy/
 │   └── openai.py                 # OpenAICompatibleProvider (Multi-key round-robin pool)
 ├── tests/                        # Comprehensive Pytest Suite
 │   ├── test_atomic_parsers.py    # Unit tests for atomic parsers & session manager
+│   ├── test_mcp_server.py        # Unit tests for MCP server tools
+│   ├── test_provider_metrics.py  # Unit tests for per-provider RPM/TPM metrics
 │   ├── test_models.py            # Unit tests for data transfer models
-│   └── test_proxy.py             # 44 deterministic unit tests (Gateway, router, fallbacks)
+│   └── test_proxy.py             # Gateway, router, fallbacks, and circuit breaker unit tests
 └── server.py                     # FastAPI app entrypoint & lifespan lifecycle hooks
 ```
 
@@ -132,13 +137,14 @@ claude-code-proxy/
 - **`atomic/guards/token_budget.py`**: Tokenizer-based context truncation (`smart_truncate`).
 - **`atomic/guards/subagent.py`**: Subagent policy guard enforcing `run_in_background=False`.
 
-### C. Core Katmanı (`core/`)
-- **Business Logic & Stream Orchestration**:
+### C. Core & API/MCP Katmanı (`core/`, `api/`)
+- **Business Logic, Stream Orchestration & MCP Tools**:
 - **`core/transformer/stream_engine.py`**: The `StreamEngine` acts as an orchestrator, receiving raw upstream chunk streams and piping them sequentially through atomic parsers (`ThinkingParser` -> `HeuristicToolParser` -> `SubagentGuard` -> `StreamGuard`).
 - **`core/router/selector.py`**: Central `ModelSelector` picking candidate models based on availability and fallback priority.
 - **`core/router/circuit_breaker.py`**: Circuit Breaker state machine (CLOSED -> OPEN -> HALF_OPEN).
 - **`core/router/rate_limiter.py`**: Dynamic Rate Limiter parsing upstream headers.
 - **`core/gateway.py`**: FastAPI route handlers for `/v1/messages`, `/v1/models`, `/v1/messages/count_tokens`.
+- **`api/mcp.py` & `mcp_server.py`**: Model Context Protocol (MCP) server providing standard JSON-RPC 2.0 tools for Hermes Agent (`get_models`, `set_model_mapping`, `get_system_config`, `update_system_config`, `get_metrics`, `control_circuit_breaker`).
 
 ---
 
@@ -147,15 +153,15 @@ claude-code-proxy/
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Client as Claude Code CLI
-    participant Gateway as core.gateway
+    actor Client as Claude Code CLI / Hermes Agent
+    participant Gateway as core.gateway / api.mcp
     participant Selector as core.router.selector: ModelSelector
     participant Guard as atomic.guards: TokenBudgetGuard
     participant Provider as providers.openai: Provider Pool
     participant Engine as core.transformer: StreamEngine
     participant Atomic as atomic.parsers: Atomic Parsers
 
-    Client->>Gateway: POST /v1/messages (Anthropic Schema)
+    Client->>Gateway: POST /v1/messages or POST /mcp (JSON-RPC 2.0)
     Gateway->>Selector: pick_model("claude-3-5-sonnet")
     Selector-->>Gateway: Selected Model: "nvidia_nim/meta/llama-3.1-70b-instruct"
     
@@ -194,13 +200,13 @@ Configured in [config/models.yaml](file:///media/bekir/HDDStorage/PROJECTS/MY_AP
 
 ## 6. Verification & Test Suite
 
-The codebase includes 44 unit tests covering atomic parsers, data models, gateway auth, circuit breakers, rate limiters, token truncation, and stream guards:
+The codebase includes 99 unit tests covering atomic parsers, data models, gateway auth, circuit breakers, rate limiters, token truncation, stream guards, per-provider RPM/TPM metrics, and MCP server JSON-RPC tools:
 
 - **Run all unit tests**:
   ```bash
-  .venv/bin/pytest -v
+  uv run pytest -v
   ```
 - **Run ruff linter & code style check**:
   ```bash
-  .venv/bin/ruff check .
+  uv run ruff check .
   ```

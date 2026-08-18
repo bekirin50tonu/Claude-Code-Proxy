@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from api.dashboard import router as dashboard_router
+from api.mcp import mcp_router
 from bot import start_all_bots, stop_all_bots
 from core.gateway import router as api_router
 
@@ -43,6 +44,7 @@ if static_dir.exists():
 # Register endpoints
 app.include_router(api_router)
 app.include_router(dashboard_router)
+app.include_router(mcp_router)
 
 
 @app.get("/")
@@ -55,4 +57,8 @@ async def root() -> dict[str, str]:
 
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="127.0.0.1", port=8090, reload=True)
+    import os
+
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", os.getenv("GATEWAY_PORT", 8090)))
+    uvicorn.run("server:app", host=host, port=port, reload=True)
