@@ -99,7 +99,10 @@ class ThinkingParser(BaseAtomicParser):
                 partial_idx = self.buffer.rfind("<")
                 if partial_idx != -1 and any(["<think>".startswith(self.buffer[partial_idx:].lower()), "<thought>".startswith(self.buffer[partial_idx:].lower())]):
                     text_to_flush = self.buffer[:partial_idx]
-                    self.buffer = self.buffer[partial_idx:]
+                    fragment = self.buffer[partial_idx:]
+                    self.buffer = fragment
+                    from loguru import logger
+                    logger.info("🔄 \033[1;34m[ThinkingStatefulParser]\033[0m Buffered partial opening tag '{}' across chunk boundary.", fragment)
                 else:
                     text_to_flush = self.buffer
                     self.buffer = ""
@@ -129,7 +132,10 @@ class ThinkingParser(BaseAtomicParser):
                 partial_idx = self.buffer.rfind("<")
                 if partial_idx != -1 and any(["</think>".startswith(self.buffer[partial_idx:].lower()), "</thought>".startswith(self.buffer[partial_idx:].lower())]):
                     thinking_to_flush = self.buffer[:partial_idx]
-                    self.buffer = self.buffer[partial_idx:]
+                    fragment = self.buffer[partial_idx:]
+                    self.buffer = fragment
+                    from loguru import logger
+                    logger.info("🔄 \033[1;34m[ThinkingStatefulParser]\033[0m Buffered partial closing tag '{}' across chunk boundary.", fragment)
                 else:
                     thinking_to_flush = self.buffer
                     self.buffer = ""

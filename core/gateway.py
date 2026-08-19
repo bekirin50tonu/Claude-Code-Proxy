@@ -341,6 +341,9 @@ async def messages_endpoint(request: Request) -> Any:
     tried_models: list[str] = []
     attempt_history: list[dict[str, Any]] = []
 
+    from core.interceptor.json_repair import JSONRepairNormalizer
+    is_stop_hook = JSONRepairNormalizer.is_stop_hook_target(body)
+
     for mapped_model in candidates:
         if not model_selector._is_available(mapped_model):
             tried_models.append(mapped_model)
@@ -380,9 +383,10 @@ async def messages_endpoint(request: Request) -> Any:
                 )
 
                 if stream:
-                    assert isinstance(upstream_res, AsyncGenerator)
+                    assert hasattr(upstream_res, "__aiter__")
+
                     session_id = request.headers.get("x-session-id") or request.headers.get("x-conversation-id")
-                    engine = StreamEngine(target_model=client_model, tools=tools, session_id=session_id)
+                    engine = StreamEngine(target_model=client_model, tools=tools, session_id=session_id, is_stop_hook=is_stop_hook)
                     guarded_stream = guarded(
                         engine.stream_response(upstream_res),
                         stream_timeout=settings.HTTP_READ_TIMEOUT,
@@ -443,6 +447,10 @@ async def messages_endpoint(request: Request) -> Any:
 
                     translated = translate_non_stream_response(resp_body)
                     translated["model"] = client_model
+
+                    if is_stop_hook:
+                        translated = await JSONRepairNormalizer.process_response_dict(translated)
+
                     record_request_log(
                         "POST",
                         "/v1/messages",

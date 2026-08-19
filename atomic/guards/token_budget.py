@@ -1,5 +1,6 @@
 """Token Budget Guard — context-window-aware message truncation in Atomic layer."""
 
+import functools
 from typing import Any
 
 import tiktoken
@@ -11,8 +12,9 @@ SAFETY_BUFFER = 256
 _O200K_FAMILIES = ("llama", "mistral", "qwen", "glm", "gemma", "deepseek", "phi")
 
 
+@functools.lru_cache(maxsize=16)
 def _get_encoding(model_id: str) -> tiktoken.Encoding:
-    """Select the best tiktoken encoding for the upstream model."""
+    """Select the best tiktoken encoding for the upstream model (cached in LRU)."""
     model_lower = model_id.lower()
     if any(fam in model_lower for fam in _O200K_FAMILIES):
         try:

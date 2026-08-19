@@ -223,6 +223,8 @@ class ModelConverter:
                     args = {}
                 if not isinstance(args, dict):
                     args = {}
+                from atomic.guards.file_edit_guard import file_edit_guard
+                args = file_edit_guard.sanitize_tool_input(func.get("name", ""), args)
                 blocks.append(
                     AnthropicContentBlock(
                         type="tool_use",
@@ -241,17 +243,26 @@ class ModelConverter:
                 if remaining:
                     blocks.append(AnthropicContentBlock(type="text", text=remaining))
                 for pt in parsed_tools:
+                    from atomic.guards.file_edit_guard import file_edit_guard
+                    pt_input = file_edit_guard.sanitize_tool_input(pt.get("name", ""), pt.get("input", {}))
                     blocks.append(
                         AnthropicContentBlock(
                             type="tool_use",
                             id=pt.get("id", f"toolu_{uuid.uuid4().hex[:10]}"),
                             name=pt.get("name", ""),
-                            input=pt.get("input", {}),
+                            input=pt_input,
                         )
                     )
+
                 has_tool_block = True
             else:
-                blocks.append(AnthropicContentBlock(type="text", text=text_content))
+                cleaned_text = text_content.strip()
+                if cleaned_text.startswith("```"):
+                    import re
+                    cleaned_text = re.sub(r"^```(?:json)?\s*", "", cleaned_text, flags=re.IGNORECASE)
+                    cleaned_text = re.sub(r"\s*```$", "", cleaned_text)
+                    cleaned_text = cleaned_text.strip()
+                blocks.append(AnthropicContentBlock(type="text", text=cleaned_text))
 
         if not blocks:
             blocks.append(AnthropicContentBlock(type="text", text=""))

@@ -92,6 +92,11 @@ def check_mock_request(request_body: dict[str, Any]) -> dict[str, Any] | None:
     Check if the request is a mock candidate.
     Returns a mocked Anthropic Message response dict if matched, or None.
     """
+    from atomic.guards.local_mocking_shield import LocalMockingShield
+    is_hk, hk_kind = LocalMockingShield.is_housekeeping_request(request_body)
+    if is_hk:
+        return LocalMockingShield.generate_mock_response(request_body, kind=hk_kind)
+
     model = request_body.get("model", "claude-3-5-sonnet-latest")
     all_text = get_all_text(request_body)
     max_tokens = request_body.get("max_tokens", 4096)

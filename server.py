@@ -11,6 +11,7 @@ from api.dashboard import router as dashboard_router
 from api.mcp import mcp_router
 from bot import start_all_bots, stop_all_bots
 from core.gateway import router as api_router
+from core.interceptor import JSONRepairMiddleware
 
 
 @asynccontextmanager
@@ -36,6 +37,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Register JSON Repair Middleware
+app.add_middleware(JSONRepairMiddleware)
+
 # Register static files directory
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
@@ -59,6 +63,8 @@ async def root() -> dict[str, str]:
 if __name__ == "__main__":
     import os
 
+    from config import settings
+
     host = os.getenv("HOST", "127.0.0.1")
     port = int(os.getenv("PORT", os.getenv("GATEWAY_PORT", 8090)))
-    uvicorn.run("server:app", host=host, port=port, reload=True)
+    uvicorn.run("server:app", host=host, port=port, reload=settings.RELOAD)

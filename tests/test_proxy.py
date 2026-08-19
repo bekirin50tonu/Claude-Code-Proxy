@@ -109,6 +109,8 @@ def test_mock_detection() -> None:
     assert mock_res["id"] == "msg_mock_suggestion"
 
 
+
+
 def test_command_prefix_extraction() -> None:
     text = "Check this command: `git status` or analyze its safety."
     assert extract_command_prefix(text) == "git"
@@ -1210,6 +1212,119 @@ async def test_stream_engine_sequential_thinking_and_tool_call_block_closing() -
     assert "event: content_block_start" in full_text
     assert '"type": "thinking"' in full_text
     assert '"type": "tool_use"' in full_text
+
+
+def test_dev_logger_records_to_logs_dir(tmp_path: pytest.TempPathFactory) -> None:
+    """Test DevLogger writes raw request and formatted log entries to logs/ directory."""
+    from pathlib import Path
+
+    from shared.utils.dev_logger import DevLogger
+
+    dev_log = DevLogger(logs_dir=Path(tmp_path))
+
+    dev_log.record_transaction(
+        request_id="req_test_123",
+        method="POST",
+        path="/v1/messages",
+        client_model="claude-3-5-sonnet",
+        mapped_model="nvidia_nim/model",
+        status_code=200,
+        duration_ms=150.0,
+        request_body={"messages": [{"role": "user", "content": "hi"}]},
+        response_body={"content": [{"type": "text", "text": "hello"}]},
+    )
+
+    raw_jsonl = tmp_path / "raw_requests.jsonl"
+    dev_log_txt = tmp_path / "dev_proxy.log"
+
+    assert raw_jsonl.exists()
+    assert dev_log_txt.exists()
+
+    raw_content = raw_jsonl.read_text(encoding="utf-8")
+    assert "req_test_123" in raw_content
+    assert '"request"' in raw_content
+    assert '"response"' in raw_content
+    assert '"result"' in raw_content
+
+    txt_content = dev_log_txt.read_text(encoding="utf-8")
+    assert "req_test_123" in txt_content
+    assert "[1. REQUEST (Claude Code -> Proxy)]" in txt_content
+    assert "[2. RESPONSE (LLM Model -> Proxy)]" in txt_content
+    assert "[3. RESULT (Proxy -> Claude Code)]" in txt_content
+
+
+def test_file_edit_guard_auto_healing(tmp_path: pytest.TempPathFactory) -> None:
+    """Test FileEditGuard auto-corrects wrong StartLine/EndLine and fuzzy matches target content."""
+    from pathlib import Path
+
+    from atomic.guards.file_edit_guard import FileEditGuard
+
+    target_file = Path(tmp_path) / "layout.tsx"
+    target_file.write_text(
+        "import React from 'react';\n"
+        "export default function RootLayout() {\n"
+        "  return (\n"
+        "    <html>\n"
+        "      <body>Hello</body>\n"
+        "    </html>\n"
+        "  );\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    guard = FileEditGuard()
+
+    # Case 1: LLM specifies wrong line bounds [1, 2] for code located at lines 4-6
+    bad_input = {
+        "TargetFile": str(target_file),
+        "StartLine": 1,
+        "EndLine": 2,
+        "TargetContent": "<html>\n      <body>Hello</body>\n    </html>",
+        "ReplacementContent": "<div>Hello World</div>",
+    }
+
+    healed = guard.sanitize_tool_input("replace_file_content", bad_input)
+    assert healed["StartLine"] == 1
+    # Line bounds must expand beyond line 6 to safely cover the match
+    assert healed["EndLine"] >= 6
+    assert "<html>" in healed["TargetContent"]
+
+
+def test_extract_all_json_tool_calls_hermes_xml_tags() -> None:
+    """Test extract_all_json_tool_calls converts Hermes <tool_call> tags to valid tool_use blocks."""
+    from core.transformer.stream_engine import extract_all_json_tool_calls
+
+    hermes_sample = (
+        "Let me inspect the server log.\n"
+        "<tool_call>\n"
+        "<<function=Bash>\n"
+        "<<parameter=command>cat /tmp/start.log</parameter>\n"
+        "</tool_call>"
+    )
+
+    remaining, tools = extract_all_json_tool_calls(hermes_sample, allowed_tools=["Bash", "view_file"])
+    assert len(tools) == 1
+    assert tools[0]["name"] == "Bash"
+    assert tools[0]["input"] == {"command": "cat /tmp/start.log"}
+    assert remaining.strip() == "Let me inspect the server log."
+
+
+def test_extract_all_json_tool_calls_case_insensitive_matching() -> None:
+    """Test extract_all_json_tool_calls maps lowercased model tool names (e.g. bash) to exact client casing (e.g. Bash)."""
+    from core.transformer.stream_engine import extract_all_json_tool_calls
+
+    lowercase_json_sample = '```json\n{"name": "bash", "arguments": {"command": "ls -la"}}\n```'
+    allowed = [{"name": "Bash"}, {"name": "Edit"}]
+
+    remaining, tools = extract_all_json_tool_calls(lowercase_json_sample, allowed_tools=allowed)
+    assert len(tools) == 1
+    assert tools[0]["name"] == "Bash"  # Restored to exact client casing!
+    assert tools[0]["input"] == {"command": "ls -la"}
+
+
+
+
+
 
 
 

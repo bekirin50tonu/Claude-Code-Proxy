@@ -85,13 +85,21 @@ def _find_balanced_json_objects(text: str) -> list[tuple[int, int]]:
 def _parse_tool_from_json(
     obj: dict[str, Any],
     allowed_names: set[str] | None = None,
+    allowed_name_map: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     """If *obj* looks like a tool call dict return a ``tool_use`` block."""
     if "name" not in obj or not isinstance(obj["name"], str):
         return None
     name: str = obj["name"]
-    if allowed_names is not None and name not in allowed_names:
-        return None
+    resolved_name = name
+    if allowed_names is not None:
+        if name in allowed_names:
+            resolved_name = name
+        elif allowed_name_map and name.lower() in allowed_name_map:
+            resolved_name = allowed_name_map[name.lower()]
+        else:
+            return None
+
     input_data = (
         obj.get("parameters")
         or obj.get("arguments")
@@ -105,7 +113,7 @@ def _parse_tool_from_json(
     return {
         "type": "tool_use",
         "id": f"toolu_{uuid.uuid4().hex[:10]}",
-        "name": name,
+        "name": resolved_name,
         "input": input_data,
     }
 
@@ -114,51 +122,124 @@ def extract_all_json_tool_calls(
     text: str,
     allowed_tools: list[dict[str, Any]] | list[str] | set[str] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
-    """Extract all JSON tool-call structures embedded in text."""
+    """Extract all JSON and XML/Hermes tool-call structures embedded in text."""
     if not text:
         return text, []
 
+    from atomic.parsers.auto_close_tag import AutoCloseTagParser
+    from core.interceptor.json_repair import JSONRepairNormalizer
+
+    repaired_input = AutoCloseTagParser.repair_truncated_stream(text)
+    safe_text = JSONRepairNormalizer.fix_angle_brackets(repaired_input)
+
     allowed_names: set[str] | None = None
+    allowed_name_map: dict[str, str] | None = None
     if allowed_tools is not None:
         allowed_names = set()
+        allowed_name_map = {}
         for item in allowed_tools:
             if isinstance(item, str):
                 allowed_names.add(item)
+                allowed_name_map[item.lower()] = item
             elif isinstance(item, dict) and "name" in item and isinstance(item["name"], str):
-                allowed_names.add(item["name"])
-
-    cleaned = re.sub(r"```(?:json|JSON)?\s*\n?", "", text)
-    spans = _find_balanced_json_objects(cleaned)
-    if not spans:
-        return text, []
+                tname = item["name"]
+                allowed_names.add(tname)
+                allowed_name_map[tname.lower()] = tname
 
     tools: list[dict[str, Any]] = []
-    remove_ranges: list[tuple[int, int]] = []
 
-    for start, end in spans:
-        json_str = cleaned[start:end]
-        parsed = safe_parse_json(json_str)
-        if not isinstance(parsed, dict):
-            continue
-        tool_block = _parse_tool_from_json(parsed, allowed_names=allowed_names)
-        if tool_block is not None:
-            tools.append(tool_block)
-            remove_ranges.append((start, end))
+    # 1. Parse <tool_call> tags (Hermes / XML / JSON in <tool_call>)
+    def replace_tool_call_tag(match: re.Match[str]) -> str:
+        block = match.group(1).strip()
+        fn_match = re.search(r"<<?function=(.*?)>>?", block)
+        if fn_match:
+            name = fn_match.group(1).strip()
+            resolved_name = name
+            if allowed_names is not None:
+                if name in allowed_names:
+                    resolved_name = name
+                elif allowed_name_map and name.lower() in allowed_name_map:
+                    resolved_name = allowed_name_map[name.lower()]
+                elif name:
+                    resolved_name = name
 
-    if not tools:
-        return text, []
+            if resolved_name:
+                params: dict[str, Any] = {}
+                param_matches = re.findall(r"<<?parameter=(.*?)>>?(.*?)</parameter>", block, re.DOTALL)
+                for p_name, p_val in param_matches:
+                    params[p_name.strip()] = p_val.strip()
+                tools.append(
+                    {
+                        "type": "tool_use",
+                        "id": f"toolu_{uuid.uuid4().hex[:10]}",
+                        "name": resolved_name,
+                        "input": params,
+                    }
+                )
+                return ""
+        parsed = safe_parse_json(block)
+        if isinstance(parsed, dict):
+            t_block = _parse_tool_from_json(parsed, allowed_names=allowed_names, allowed_name_map=allowed_name_map)
+            if t_block:
+                tools.append(t_block)
+                return ""
+        return ""  # Always strip <tool_call> XML noise from text output
 
-    parts: list[str] = []
-    last = 0
-    for s, e in sorted(remove_ranges):
-        if s > last:
-            parts.append(cleaned[last:s])
-        last = max(last, e)
-    if last < len(cleaned):
-        parts.append(cleaned[last:])
+    cleaned_text = re.sub(r"<tool_call>(.*?)</tool_call>", replace_tool_call_tag, safe_text, flags=re.DOTALL)
 
-    remaining = " ".join(p.strip() for p in parts if p.strip()).strip()
-    return remaining, tools
+    # 2. Parse [TOOL_CALLS] or [TOOL_CALL] tags
+    def replace_tool_calls_bracket(match: re.Match[str]) -> str:
+        block = match.group(1).strip()
+        parsed = safe_parse_json(block)
+        if isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, dict):
+                    t_block = _parse_tool_from_json(item, allowed_names=allowed_names, allowed_name_map=allowed_name_map)
+                    if t_block:
+                        tools.append(t_block)
+            return ""
+        elif isinstance(parsed, dict):
+            t_block = _parse_tool_from_json(parsed, allowed_names=allowed_names, allowed_name_map=allowed_name_map)
+            if t_block:
+                tools.append(t_block)
+                return ""
+        return match.group(0)
+
+    cleaned_text = re.sub(
+        r"\[TOOL_CALLS?\]\s*(\[.*?\]|\{.*?\})",
+        replace_tool_calls_bracket,
+        cleaned_text,
+        flags=re.DOTALL,
+    )
+
+    # 3. Parse balanced JSON objects (standard embedded JSON codeblocks or text)
+    cleaned = re.sub(r"```(?:json|JSON)?\s*\n?", "", cleaned_text)
+    spans = _find_balanced_json_objects(cleaned)
+    if spans:
+        remove_ranges: list[tuple[int, int]] = []
+        for start, end in spans:
+            json_str = cleaned[start:end]
+            parsed = safe_parse_json(json_str)
+            if not isinstance(parsed, dict):
+                continue
+            tool_block = _parse_tool_from_json(parsed, allowed_names=allowed_names, allowed_name_map=allowed_name_map)
+            if tool_block is not None:
+                tools.append(tool_block)
+                remove_ranges.append((start, end))
+
+        if remove_ranges:
+            parts: list[str] = []
+            last = 0
+            for s, e in sorted(remove_ranges):
+                if s > last:
+                    parts.append(cleaned[last:s])
+                last = max(last, e)
+            if last < len(cleaned):
+                parts.append(cleaned[last:])
+            cleaned_text = " ".join(p.strip() for p in parts if p.strip()).strip()
+
+    cleaned_text = cleaned_text.strip()
+    return cleaned_text, tools
 
 
 def extract_json_tool_call(
@@ -186,9 +267,12 @@ class StreamEngine:
         target_model: str,
         tools: list[dict[str, Any]] | None = None,
         session_id: str | None = None,
+        is_stop_hook: bool = False,
     ):
         self.target_model = target_model
         self.tools = tools
+        self.session_id = session_id
+        self.is_stop_hook = is_stop_hook
         self.message_id = f"msg_{uuid.uuid4().hex[:10]}"
         self.session = session_manager.get_or_create_session(session_id)
 
@@ -241,6 +325,10 @@ class StreamEngine:
             blocks.append(tc)
         if not blocks:
             blocks.append({"type": "text", "text": " "})
+
+        from atomic.sanitizers.deduplicator import DeDuplicator
+        blocks = DeDuplicator.deduplicate(blocks)
+
         return {
             "id": self.message_id,
             "type": "message",
@@ -459,10 +547,14 @@ class StreamEngine:
                 st["stopped"] = True
 
             full_args_str = "".join(st["args"])
-            parsed_args = safe_parse_json(full_args_str) or {}
+            from atomic.parsers.auto_close_tag import AutoCloseTagParser
+            repaired_args_str = AutoCloseTagParser.repair_truncated_stream(full_args_str)
+            parsed_args = safe_parse_json(repaired_args_str) or {}
 
             if isinstance(parsed_args, dict):
                 parsed_args = await self.subagent_guard.enforce_tool_call(st["tool_name"], parsed_args)
+                from atomic.guards.file_edit_guard import file_edit_guard
+                parsed_args = file_edit_guard.sanitize_tool_input(st["tool_name"], parsed_args)
 
             self.accumulated_tool_calls.append(
                 {
@@ -486,11 +578,14 @@ class StreamEngine:
             if extracted_tools:
                 for tool in extracted_tools:
                     tool["input"] = await self.subagent_guard.enforce_tool_call(tool["name"], tool.get("input", {}))
+                    from atomic.guards.file_edit_guard import file_edit_guard
+                    tool["input"] = file_edit_guard.sanitize_tool_input(tool["name"], tool.get("input", {}))
                     idx = self._next_block_index()
                     yield AnthropicSSEFormatter.tool_use_start(idx, tool["id"], tool["name"])
                     yield AnthropicSSEFormatter.input_json_delta(json.dumps(tool["input"]), idx)
                     yield AnthropicSSEFormatter.block_stop(idx)
                     self.accumulated_tool_calls.append(tool)
+
                     import asyncio
 
                     from bot.live_bridge import live_bridge_manager
@@ -511,12 +606,24 @@ class StreamEngine:
         if not self.text_or_tool_emitted:
             full_think_text = "".join(self.accumulated_thinking).strip()
             fallback_text = full_think_text if full_think_text else " "
+            if "```" in fallback_text or "{" in fallback_text:
+                from core.interceptor.json_repair import JSONRepairNormalizer
+                fallback_text = await JSONRepairNormalizer.process_text(fallback_text)
+
             idx = self._next_block_index()
             yield AnthropicSSEFormatter.text_start(idx)
             yield AnthropicSSEFormatter.text_delta(fallback_text, idx)
             yield AnthropicSSEFormatter.block_stop(idx)
             self.text_or_tool_emitted = True
             self.accumulated_text.append(fallback_text)
+
+        # Normalize Stop Hook responses if target flag is active
+        if self.is_stop_hook and self.accumulated_text:
+            full_stop_text = "".join(self.accumulated_text).strip()
+            if full_stop_text:
+                from core.interceptor.json_repair import JSONRepairNormalizer
+                normalized_stop_text = await JSONRepairNormalizer.process_text(full_stop_text)
+                self.accumulated_text = [normalized_stop_text]
 
         self.final_stop_reason = stop_reason
         self.final_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}

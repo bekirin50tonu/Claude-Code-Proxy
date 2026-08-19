@@ -549,6 +549,10 @@ class Settings:
     ENABLE_FILEPATH_EXTRACTION_MOCK: bool = get_bool(
         "ENABLE_FILEPATH_EXTRACTION_MOCK", True
     )
+    ENABLE_STOP_HOOK_MOCK: bool = get_bool("ENABLE_STOP_HOOK_MOCK", True)
+
+    # Server options
+    RELOAD: bool = get_bool("RELOAD", False)
 
     # Thinking directive modes per model: "inherit" (native), "open" (force think tags), "close" (suppress think tags)
     THINKING_MODE_OPUS: str = os.getenv("THINKING_MODE_OPUS", "inherit")
@@ -688,6 +692,8 @@ class Settings:
         self.ENABLE_FILEPATH_EXTRACTION_MOCK = get_bool(
             "ENABLE_FILEPATH_EXTRACTION_MOCK", True
         )
+        self.ENABLE_STOP_HOOK_MOCK = get_bool("ENABLE_STOP_HOOK_MOCK", True)
+        self.RELOAD = get_bool("RELOAD", False)
         self.THINKING_MODE_OPUS = os.getenv("THINKING_MODE_OPUS", "inherit")
         self.THINKING_MODE_SONNET = os.getenv("THINKING_MODE_SONNET", "inherit")
         self.THINKING_MODE_HAIKU = os.getenv("THINKING_MODE_HAIKU", "inherit")
@@ -709,6 +715,15 @@ for _p, _d in PROVIDER_DEFAULTS.items():
 
 
 _LOG_FILE_PATH = Path(__file__).parent.parent / ".development" / "requests.jsonl"
+_TokenBudgetGuardCls = None
+
+
+def _get_token_budget_guard(client_model: str) -> Any:
+    global _TokenBudgetGuardCls
+    if _TokenBudgetGuardCls is None:
+        from atomic.guards.token_budget import TokenBudgetGuard
+        _TokenBudgetGuardCls = TokenBudgetGuard
+    return _TokenBudgetGuardCls(client_model)
 
 
 class ProxyStats:
@@ -773,8 +788,7 @@ class ProxyStats:
         output_tokens = 0
 
         if request_body and isinstance(request_body, dict):
-            from atomic.guards.token_budget import TokenBudgetGuard
-            guard = TokenBudgetGuard(client_model)
+            guard = _get_token_budget_guard(client_model)
             input_tokens = guard.count_prompt_tokens(
                 request_body.get("messages", []),
                 request_body.get("system"),
@@ -824,6 +838,27 @@ class ProxyStats:
                 f.write(json.dumps(entry.to_dict(include_payload=True)) + "\n")
         except Exception as write_err:
             logger.warning("Failed to persist request log to disk: %s", write_err)
+
+        # Also write raw dev logs to logs/ directory
+        try:
+            from shared.utils.dev_logger import dev_logger
+            dev_logger.record_transaction(
+                request_id=entry.id,
+                method=method,
+                path=path,
+                client_model=client_model,
+                mapped_model=mapped_model,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                request_body=request_body,
+                response_body=response_body,
+                headers=headers,
+                error_details=error_details,
+                fallbacks_used=fallbacks_used,
+            )
+        except Exception as dev_err:
+            logger.warning("Failed to write dev logs: %s", dev_err)
+
 
     def get_recent_dicts(self, include_payload: bool = True) -> list[dict[str, Any]]:
         return [entry.to_dict(include_payload=include_payload) for entry in self.recent_requests]

@@ -123,6 +123,16 @@ class HeuristicToolParser(BaseAtomicParser):
             except Exception:
                 pass
 
+        # Stateful partial tag buffering across chunk boundaries
+        partial_prefixes = ("<tool_call", "<function=", "<parameter=", "[TOOL_CALL", "```bash", "```json")
+        for tag in partial_prefixes:
+            for i in range(1, len(tag)):
+                sub = tag[:i]
+                if self.text_buffer.endswith(sub):
+                    from loguru import logger
+                    logger.info("🔄 \033[1;34m[HeuristicToolStatefulParser]\033[0m Buffered partial tool tag '{}' across chunk boundary.", sub)
+                    return events
+
         return events
 
     async def flush(self) -> list[SSEBaseEvent]:
