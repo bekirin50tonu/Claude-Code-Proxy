@@ -32,7 +32,7 @@ class PromptQueueManager:
         sid = session_id or "default_session"
         q = self._get_queue(sid)
         prompts: list[str] = []
-        while not q.empty():
+        while True:
             try:
                 prompts.append(q.get_nowait())
                 q.task_done()

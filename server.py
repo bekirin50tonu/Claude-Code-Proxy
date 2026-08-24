@@ -48,8 +48,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Shutdown hooks
-    logger.info("Shutting down bots...")
+    logger.info("Gracefully shutting down proxy server...")
     await stop_all_bots()
+
+    import time
+    drain_timeout = 5.0
+    start_drain = time.monotonic()
+    while stats.active_concurrency > 0 and (time.monotonic() - start_drain) < drain_timeout:
+        await asyncio.sleep(0.1)
+
     logger.info("Claude Code Proxy Server shutdown complete.")
 
 
@@ -82,6 +89,40 @@ async def root() -> dict[str, str]:
         "name": "Claude Code Proxy Server (Gateway)",
         "docs": "https://github.com/bekirin50tonu/Claude-Code-Proxy",
     }
+
+
+@app.get("/health")
+async def health_liveness() -> dict[str, str]:
+    """Liveness probe returning 200 OK if proxy server is running."""
+    return {"status": "ok", "service": "claude-code-proxy"}
+
+
+@app.get("/health/ready")
+async def health_readiness() -> JSONResponse:
+    """Readiness probe checking server state and model circuit breaker headroom."""
+    from config import stats
+    from core.router.selector import model_selector
+
+    status_data = model_selector.get_status()
+    all_open = all(
+        v.get("circuit_breaker", {}).get("state") == "open"
+        for v in status_data.values()
+        if isinstance(v, dict)
+    ) if status_data else False
+
+    if all_open:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "reason": "All upstream circuit breakers are OPEN"},
+        )
+
+    return JSONResponse(
+        content={
+            "status": "ready",
+            "active_concurrency": stats.active_concurrency,
+            "total_requests": stats.total_requests,
+        }
+    )
 
 
 if __name__ == "__main__":

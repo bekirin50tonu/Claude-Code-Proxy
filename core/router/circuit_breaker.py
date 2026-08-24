@@ -131,8 +131,8 @@ class CircuitBreaker:
         """Force circuit breaker into OPEN state with given failure reason."""
         await self.trip_or_extend(reason=reason)
 
-    async def is_open(self) -> bool:
-        """Return True when requests should be blocked (OPEN state)."""
+    async def check_daily_quota(self) -> bool:
+        """Check daily RPD tracker quota and update circuit state if exceeded."""
         async with self._lock:
             provider = self.model_id.split("/", 1)[0] if "/" in self.model_id else "nvidia_nim"
             from core.router.daily_tracker import daily_request_tracker
@@ -151,7 +151,14 @@ class CircuitBreaker:
                     reg.save_to_file()
                     reg.notify_trip(self.model_id, self._last_failure_reason)
                 return True
+            return False
 
+    async def is_open(self) -> bool:
+        """Return True when requests should be blocked (OPEN state)."""
+        if await self.check_daily_quota():
+            return True
+
+        async with self._lock:
             if self._state == CircuitState.OPEN:
                 now_wall = time.time()
                 if self.expired_at and now_wall >= self.expired_at:

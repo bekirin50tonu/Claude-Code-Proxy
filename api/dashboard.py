@@ -9,92 +9,35 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from loguru import logger
 from pydantic import BaseModel
 
-from config import settings, stats
+from config import model_registry, settings, stats
 from core.router.selector import model_selector as model_router
 
 router = APIRouter()
 
-# Fallback models in case API calls fail or keys are missing
-FALLBACK_MODELS = {
-    "nvidia_nim": [
-        "nvidia/llama-3.1-nemotron-70b-instruct",
-        "nvidia/nemotron-4-340b-instruct",
-        "meta/llama-3.1-405b-instruct",
-        "meta/llama-3.1-70b-instruct",
-        "meta/llama-3.1-8b-instruct",
-        "meta/llama-3.3-70b-instruct",
-        "z-ai/glm-5.2",
-        "mistralai/mixtral-8x22b-instruct-v0.1",
-    ],
-    "open_router": [
-        "google/gemini-2.5-flash:free",
-        "google/gemini-2.5-pro",
-        "meta-llama/llama-3.3-70b-instruct",
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "deepseek/deepseek-chat",
-        "deepseek/deepseek-r1",
-        "arcee-ai/trinity-large-preview:free",
-        "qwen/qwen-2.5-72b-instruct",
-        "mistralai/pixtral-12b:free",
-        "stepfun/step-3.5-flash:free",
-    ],
-    "gemini": [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.0-flash",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash",
-    ],
-    "groq": [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "mixtral-8x7b-32768",
-        "gemma2-9b-it",
-        "deepseek-r1-distill-llama-70b",
-    ],
-    "deepseek": [
-        "deepseek-chat",
-        "deepseek-coder",
-        "deepseek-reasoner",
-    ],
-    "mistral": [
-        "mistral-large-latest",
-        "mistral-medium-latest",
-        "mistral-small-latest",
-        "codestral-latest",
-        "pixtral-large-latest",
-    ],
-    "cerebras": [
-        "llama3.3-70b",
-        "llama3.1-8b",
-    ],
-    "fireworks": [
-        "accounts/fireworks/models/llama-v3p3-70b-instruct",
-        "accounts/fireworks/models/deepseek-v3",
-        "accounts/fireworks/models/deepseek-r1",
-        "accounts/fireworks/models/qwen2p5-72b-instruct",
-    ],
-    "kimi": [
-        "moonshot-v1-8k",
-        "moonshot-v1-32k",
-        "moonshot-v1-128k",
-    ],
-    "lmstudio": [
-        "qwen2.5-7b-instruct",
-        "llama-3.2-3b-instruct",
-        "phi-3-mini-4k-instruct",
-        "mistral-7b-instruct",
-    ],
-    "ollama": [
-        "llama3.3",
-        "llama3.1:70b",
-        "qwen2.5-coder",
-        "deepseek-r1",
-    ],
-    "llama_cpp": [
-        "local-model",
-    ],
-}
+# Fallback models loaded dynamically from models.yaml via model_registry
+def get_fallback_models() -> dict[str, list[str]]:
+    pm = model_registry.get_provider_models()
+    return pm if pm else {}
+
+
+class _FallbackModelsProxy(dict):
+    def get(self, key: str, default: Any = None) -> Any:
+        return get_fallback_models().get(key, default)
+
+    def items(self):
+        return get_fallback_models().items()
+
+    def keys(self):
+        return get_fallback_models().keys()
+
+    def values(self):
+        return get_fallback_models().values()
+
+    def __getitem__(self, item: str) -> list[str]:
+        return get_fallback_models()[item]
+
+
+FALLBACK_MODELS = _FallbackModelsProxy()
 
 
 class ConfigSaveRequest(BaseModel):
@@ -148,6 +91,7 @@ def get_key_statuses() -> dict[str, str]:
         "NVIDIA_NIM_API_KEYS",
         "NVIDIA_NIM_API_KEY",
         "OPENROUTER_API_KEY",
+        "TOKENROUTER_API_KEY",
         "GATEWAY_AUTH_TOKEN",
         "MISTRAL_API_KEY",
         "GEMINI_API_KEY",
@@ -161,6 +105,7 @@ def get_key_statuses() -> dict[str, str]:
         "OLLAMA_BASE_URL",
         "NVIDIA_NIM_BASE_URL",
         "OPENROUTER_BASE_URL",
+        "TOKENROUTER_BASE_URL",
         "MISTRAL_BASE_URL",
         "GEMINI_BASE_URL",
         "GROQ_BASE_URL",
@@ -276,6 +221,7 @@ async def get_available_models() -> JSONResponse:
     """Fetch and aggregate models across all supported providers dynamically."""
     providers_config = [
         ("open_router", f"{settings.OPENROUTER_BASE_URL.rstrip('/')}/models", settings.OPENROUTER_API_KEY),
+        ("tokenrouter", f"{settings.TOKENROUTER_BASE_URL.rstrip('/')}/models", settings.TOKENROUTER_API_KEY),
         ("nvidia_nim", f"{settings.NVIDIA_NIM_BASE_URL.rstrip('/')}/models", settings.NVIDIA_NIM_API_KEY),
         ("gemini", f"{settings.GEMINI_BASE_URL.rstrip('/')}/openai/models", settings.GEMINI_API_KEY),
         ("groq", f"{settings.GROQ_BASE_URL.rstrip('/')}/models", settings.GROQ_API_KEY),
@@ -323,6 +269,7 @@ async def get_config() -> JSONResponse:
         "NVIDIA_NIM_API_KEY": nim_key_val,
         "NVIDIA_NIM_API_KEYS": nim_key_val,
         "OPENROUTER_API_KEY": settings.OPENROUTER_API_KEY,
+        "TOKENROUTER_API_KEY": settings.TOKENROUTER_API_KEY,
         "GATEWAY_AUTH_TOKEN": settings.GATEWAY_AUTH_TOKEN,
         "MISTRAL_API_KEY": settings.MISTRAL_API_KEY,
         "GEMINI_API_KEY": settings.GEMINI_API_KEY,
@@ -336,6 +283,7 @@ async def get_config() -> JSONResponse:
         "OLLAMA_BASE_URL": settings.OLLAMA_BASE_URL,
         "NVIDIA_NIM_BASE_URL": settings.NVIDIA_NIM_BASE_URL,
         "OPENROUTER_BASE_URL": settings.OPENROUTER_BASE_URL,
+        "TOKENROUTER_BASE_URL": settings.TOKENROUTER_BASE_URL,
         "MISTRAL_BASE_URL": settings.MISTRAL_BASE_URL,
         "GEMINI_BASE_URL": settings.GEMINI_BASE_URL,
         "GROQ_BASE_URL": settings.GROQ_BASE_URL,
@@ -661,6 +609,11 @@ async def run_doctor_checks() -> JSONResponse:
         reports.append("  ├─ OPENROUTER_API_KEY: Present")
     else:
         reports.append("  ├─ OPENROUTER_API_KEY: Missing (Warning)")
+
+    if settings.TOKENROUTER_API_KEY:
+        reports.append("  ├─ TOKENROUTER_API_KEY: Present")
+    else:
+        reports.append("  ├─ TOKENROUTER_API_KEY: Missing (Warning)")
 
     if settings.NVIDIA_NIM_API_KEY:
         reports.append("  ├─ NVIDIA_NIM_API_KEY: Present")

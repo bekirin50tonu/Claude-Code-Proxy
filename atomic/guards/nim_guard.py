@@ -122,8 +122,10 @@ class NimThrottleGuard:
                 max_queue_wait=timeout_budget,
             )
 
+        acquired = False
         try:
             await asyncio.wait_for(self._concurrency_lock.acquire(), timeout=remaining)
+            acquired = True
         except TimeoutError as err:
             waited = time.monotonic() - start_time
             logger.warning(
@@ -204,8 +206,12 @@ class NimThrottleGuard:
             # Phase 3: Single-lane execution lock held across yield
             yield
         finally:
-            if self._concurrency_lock.locked():
-                self._concurrency_lock.release()
+            if acquired:
+                if self._concurrency_lock.locked():
+                    try:
+                        self._concurrency_lock.release()
+                    except RuntimeError:
+                        pass
 
     def reset(self) -> None:
         """Reset state for testing."""

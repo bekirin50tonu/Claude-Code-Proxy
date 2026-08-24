@@ -23,13 +23,6 @@ class AllModelsUnavailableError(ProxyBaseError):
 
 
 
-def _get_cb_registry():
-    mr = sys.modules.get("router.model_router")
-    if mr and hasattr(mr, "circuit_breaker_registry"):
-        return mr.circuit_breaker_registry
-    return circuit_breaker_registry
-
-
 class ModelSelector:
     """Central model selection and fallback management in Core layer."""
 
@@ -44,7 +37,7 @@ class ModelSelector:
 
     async def _is_available(self, model_id: str) -> bool:
         """Fast async check — Circuit Breaker and Rate Limiter only."""
-        cb = _get_cb_registry().get(model_id)
+        cb = circuit_breaker_registry.get(model_id)
         if await cb.is_open():
             return False
         return rate_limit_parser.has_headroom(model_id)

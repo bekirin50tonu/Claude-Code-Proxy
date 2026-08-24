@@ -40,10 +40,21 @@ class RateLimitState:
             if val is None:
                 return None
             try:
-                secs = float(val)
-                if secs > 1_000_000:
-                    secs = secs / 1000.0
-                return now + secs
+                val_float = float(val)
+                # Handle millisecond Unix timestamp
+                if val_float > 1_000_000_000_000:
+                    val_float = val_float / 1000.0
+
+                # Handle Unix epoch timestamp (seconds since 1970)
+                if val_float > 1_000_000_000:
+                    delta = max(0.0, val_float - time.time())
+                    return now + delta
+
+                # Handle relative milliseconds
+                if val_float > 100_000:
+                    val_float = val_float / 1000.0
+
+                return now + val_float
             except (ValueError, TypeError):
                 return None
 

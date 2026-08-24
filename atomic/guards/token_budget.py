@@ -195,5 +195,27 @@ class TokenBudgetGuard:
                     last_msg["content"] = self._enc.decode(clipped_tokens)
                     truncated[-1] = last_msg
                     was_truncated = True
+            elif isinstance(content_val, list):
+                new_blocks = []
+                remaining_allowed = allowed_prompt_tokens
+                for block in reversed(content_val):
+                    if isinstance(block, dict) and block.get("type") == "text" and "text" in block:
+                        txt = block.get("text", "")
+                        enc_txt = self._enc.encode(txt, disallowed_special=())
+                        if len(enc_txt) > remaining_allowed:
+                            clipped = self._enc.decode(enc_txt[-remaining_allowed:]) if remaining_allowed > 0 else "[truncated]"
+                            new_block = dict(block)
+                            new_block["text"] = clipped
+                            new_blocks.insert(0, new_block)
+                            remaining_allowed = 0
+                            was_truncated = True
+                        else:
+                            new_blocks.insert(0, block)
+                            remaining_allowed -= len(enc_txt)
+                    else:
+                        new_blocks.insert(0, block)
+                last_msg["content"] = new_blocks
+                truncated[-1] = last_msg
+                was_truncated = True
 
         return truncated, system, was_truncated

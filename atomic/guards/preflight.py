@@ -33,6 +33,10 @@ def _resolve_url_and_headers(model_id: str) -> tuple[str, dict[str, str]] | None
             extra["Authorization"] = f"Bearer {settings.OPENROUTER_API_KEY}"
         extra["HTTP-Referer"] = "https://github.com/bekirin50tonu/Claude-Code-Proxy"
         extra["X-Title"] = "Claude Code Proxy"
+    elif provider_part == "tokenrouter":
+        url = f"{settings.TOKENROUTER_BASE_URL.rstrip('/')}/chat/completions"
+        if settings.TOKENROUTER_API_KEY:
+            extra["Authorization"] = f"Bearer {settings.TOKENROUTER_API_KEY}"
     elif provider_part == "groq":
         url = f"{settings.GROQ_BASE_URL.rstrip('/')}/chat/completions"
         if settings.GROQ_API_KEY:

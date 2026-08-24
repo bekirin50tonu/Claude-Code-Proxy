@@ -160,6 +160,7 @@ class ModelRegistry:
 
     def __init__(self) -> None:
         self._entries: dict[str, ModelEntry] = {}
+        self._provider_models: dict[str, list[str]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -170,18 +171,25 @@ class ModelRegistry:
             yaml.safe_load(_MODELS_YAML_PATH.read_text(encoding="utf-8")) or {}
         )
         for alias, data in raw.items():
-            meta_raw = data.get("metadata", {})
-            self._entries[alias] = ModelEntry(
-                primary=data.get("primary", ""),
-                fallback_order=data.get("fallback_order", []),
-                metadata=ModelMetadata(
-                    context=meta_raw.get("context", 128000),
-                    max_output=meta_raw.get("max_output", 16384),
-                    rpm_limit=meta_raw.get("rpm_limit", 15),
-                    tpm_limit=meta_raw.get("tpm_limit", 200000),
-                    tags=meta_raw.get("tags", []),
-                ),
-            )
+            if alias == "provider_models" and isinstance(data, dict):
+                self._provider_models = data
+                continue
+            if isinstance(data, dict):
+                meta_raw = data.get("metadata", {})
+                self._entries[alias] = ModelEntry(
+                    primary=data.get("primary", ""),
+                    fallback_order=data.get("fallback_order", []),
+                    metadata=ModelMetadata(
+                        context=meta_raw.get("context", 128000),
+                        max_output=meta_raw.get("max_output", 16384),
+                        rpm_limit=meta_raw.get("rpm_limit", 15),
+                        tpm_limit=meta_raw.get("tpm_limit", 200000),
+                        tags=meta_raw.get("tags", []),
+                    ),
+                )
+
+    def get_provider_models(self) -> dict[str, list[str]]:
+        return dict(self._provider_models)
 
     def _resolve_alias(self, client_model: str) -> str:
         """Map a Claude client model string to a registry alias.
@@ -344,6 +352,18 @@ PROVIDER_DEFAULTS: dict[str, dict[str, int]] = {
         "http_write_timeout": 10,
         "http_connect_timeout": 2,
     },
+    "tokenrouter": {
+        "rpm": 60,
+        "tpm": 300000,
+        "rpd": 10000,
+        "rate_window": 60,
+        "max_concurrency": 10,
+        "context": 200000,
+        "max_output": 16384,
+        "http_read_timeout": 120,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
     "gemini": {
         "rpm": 30,
         "tpm": 1000000,
@@ -467,119 +487,114 @@ PROVIDER_DEFAULTS: dict[str, dict[str, int]] = {
 }
 
 
-class Settings:
-    # Upstream API keys and endpoints (supporting Docker Secrets at /run/secrets/)
-    NVIDIA_NIM_API_KEYS: str = _get_secret_or_env("NVIDIA_NIM_API_KEYS", "")
-    NVIDIA_NIM_API_KEY: str = _get_secret_or_env("NVIDIA_NIM_API_KEY", "")
+from pydantic import BaseModel, ConfigDict, Field
 
-    OPENROUTER_API_KEY: str = _get_secret_or_env("OPENROUTER_API_KEY", "")
-    GATEWAY_AUTH_TOKEN: str = _get_secret_or_env("GATEWAY_AUTH_TOKEN", "")
-    MISTRAL_API_KEY: str = _get_secret_or_env("MISTRAL_API_KEY", "")
-    GEMINI_API_KEY: str = _get_secret_or_env("GEMINI_API_KEY", "")
-    GROQ_API_KEY: str = _get_secret_or_env("GROQ_API_KEY", "")
-    DEEPSEEK_API_KEY: str = _get_secret_or_env("DEEPSEEK_API_KEY", "")
-    CEREBRAS_API_KEY: str = _get_secret_or_env("CEREBRAS_API_KEY", "")
-    FIREWORKS_API_KEY: str = _get_secret_or_env("FIREWORKS_API_KEY", "")
-    KIMI_API_KEY: str = _get_secret_or_env("KIMI_API_KEY", "")
+
+class ProviderConfig(BaseModel):
+    rpm: int = 30
+    tpm: int = 200000
+    rpd: int = 1000
+    rate_window: int = 60
+    max_concurrency: int = 5
+    context: int = 128000
+    max_output: int = 16384
+    http_read_timeout: int = 120
+    http_write_timeout: int = 10
+    http_connect_timeout: int = 2
+
+
+class Settings(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    # Upstream API keys and endpoints (supporting Docker Secrets at /run/secrets/)
+    NVIDIA_NIM_API_KEYS: str = Field(default_factory=lambda: _get_secret_or_env("NVIDIA_NIM_API_KEYS", ""))
+    NVIDIA_NIM_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("NVIDIA_NIM_API_KEY", ""))
+
+    OPENROUTER_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("OPENROUTER_API_KEY", ""))
+    TOKENROUTER_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("TOKENROUTER_API_KEY", ""))
+    GATEWAY_AUTH_TOKEN: str = Field(default_factory=lambda: _get_secret_or_env("GATEWAY_AUTH_TOKEN", ""))
+    MISTRAL_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("MISTRAL_API_KEY", ""))
+    GEMINI_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("GEMINI_API_KEY", ""))
+    GROQ_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("GROQ_API_KEY", ""))
+    DEEPSEEK_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("DEEPSEEK_API_KEY", ""))
+    CEREBRAS_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("CEREBRAS_API_KEY", ""))
+    FIREWORKS_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("FIREWORKS_API_KEY", ""))
+    KIMI_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("KIMI_API_KEY", ""))
 
     # Base URLs / Proxies
-    NVIDIA_NIM_BASE_URL: str = os.getenv(
-        "NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"
-    )
-    OPENROUTER_BASE_URL: str = os.getenv(
-        "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
-    )
-    MISTRAL_BASE_URL: str = os.getenv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1")
-    GEMINI_BASE_URL: str = os.getenv(
-        "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"
-    )
-    GROQ_BASE_URL: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-    DEEPSEEK_BASE_URL: str = os.getenv(
-        "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
-    )
-    CEREBRAS_BASE_URL: str = os.getenv(
-        "CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"
-    )
-    FIREWORKS_BASE_URL: str = os.getenv(
-        "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
-    )
-    LM_STUDIO_BASE_URL: str = os.getenv(
-        "LM_STUDIO_BASE_URL", "http://localhost:1234/v1"
-    )
-    LLAMA_CPP_BASE_URL: str = os.getenv(
-        "LLAMA_CPP_BASE_URL", "http://localhost:8080/v1"
-    )
-    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    NVIDIA_NIM_BASE_URL: str = Field(default_factory=lambda: os.getenv("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"))
+    OPENROUTER_BASE_URL: str = Field(default_factory=lambda: os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"))
+    TOKENROUTER_BASE_URL: str = Field(default_factory=lambda: os.getenv("TOKENROUTER_BASE_URL", "https://api.tokenrouter.com/v1"))
+    MISTRAL_BASE_URL: str = Field(default_factory=lambda: os.getenv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"))
+    GEMINI_BASE_URL: str = Field(default_factory=lambda: os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"))
+    GROQ_BASE_URL: str = Field(default_factory=lambda: os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"))
+    DEEPSEEK_BASE_URL: str = Field(default_factory=lambda: os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
+    CEREBRAS_BASE_URL: str = Field(default_factory=lambda: os.getenv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"))
+    FIREWORKS_BASE_URL: str = Field(default_factory=lambda: os.getenv("FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"))
+    LM_STUDIO_BASE_URL: str = Field(default_factory=lambda: os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234/v1"))
+    LLAMA_CPP_BASE_URL: str = Field(default_factory=lambda: os.getenv("LLAMA_CPP_BASE_URL", "http://localhost:8080/v1"))
+    OLLAMA_BASE_URL: str = Field(default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
 
     # Model Mappings (format: provider_type/model/name)
-    MODEL_OPUS: str = os.getenv("MODEL_OPUS", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
-    MODEL_SONNET: str = os.getenv(
-        "MODEL_SONNET", "nvidia_nim/meta/llama-3.1-70b-instruct"
-    )
-    MODEL_SONNET_1M: str = os.getenv(
-        "MODEL_SONNET_1M", "open_router/meta-llama/llama-3.3-70b-instruct"
-    )
-    MODEL_HAIKU: str = os.getenv(
-        "MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct"
-    )
-    MODEL: str = os.getenv("MODEL", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
-
+    MODEL_OPUS: str = Field(default_factory=lambda: os.getenv("MODEL_OPUS", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct"))
+    MODEL_SONNET: str = Field(default_factory=lambda: os.getenv("MODEL_SONNET", "nvidia_nim/meta/llama-3.1-70b-instruct"))
+    MODEL_SONNET_1M: str = Field(default_factory=lambda: os.getenv("MODEL_SONNET_1M", "open_router/meta-llama/llama-3.3-70b-instruct"))
+    MODEL_HAIKU: str = Field(default_factory=lambda: os.getenv("MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct"))
+    MODEL: str = Field(default_factory=lambda: os.getenv("MODEL", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct"))
 
     # Provider rate limits and performance controls
-    REFRESH_TIME: int = get_int("REFRESH_TIME", 4)
-    PROVIDER_RATE_LIMIT: int = get_int("PROVIDER_RATE_LIMIT", 40)
-    PROVIDER_RATE_WINDOW: int = get_int("PROVIDER_RATE_WINDOW", 60)
-    PROVIDER_MAX_CONCURRENCY: int = get_int("PROVIDER_MAX_CONCURRENCY", 5)
+    REFRESH_TIME: int = Field(default_factory=lambda: get_int("REFRESH_TIME", 4))
+    PROVIDER_RATE_LIMIT: int = Field(default_factory=lambda: get_int("PROVIDER_RATE_LIMIT", 40))
+    PROVIDER_RATE_WINDOW: int = Field(default_factory=lambda: get_int("PROVIDER_RATE_WINDOW", 60))
+    PROVIDER_MAX_CONCURRENCY: int = Field(default_factory=lambda: get_int("PROVIDER_MAX_CONCURRENCY", 5))
 
     # Dedicated NVIDIA NIM Proactive Rate Limiter & Guard settings
-    NVIDIA_NIM_SAFE_RPM: int = get_int("NVIDIA_NIM_SAFE_RPM", 38)
-    NVIDIA_NIM_WINDOW_SECONDS: int = get_int("NVIDIA_NIM_WINDOW_SECONDS", 60)
-    NVIDIA_NIM_MAX_QUEUE_WAIT: int = get_int("NVIDIA_NIM_MAX_QUEUE_WAIT", 30)
+    NVIDIA_NIM_SAFE_RPM: int = Field(default_factory=lambda: get_int("NVIDIA_NIM_SAFE_RPM", 38))
+    NVIDIA_NIM_WINDOW_SECONDS: int = Field(default_factory=lambda: get_int("NVIDIA_NIM_WINDOW_SECONDS", 60))
+    NVIDIA_NIM_MAX_QUEUE_WAIT: int = Field(default_factory=lambda: get_int("NVIDIA_NIM_MAX_QUEUE_WAIT", 30))
 
     # HTTP client timeouts
-    HTTP_READ_TIMEOUT: int = get_int("HTTP_READ_TIMEOUT", 120)
-    HTTP_WRITE_TIMEOUT: int = get_int("HTTP_WRITE_TIMEOUT", 10)
-    HTTP_CONNECT_TIMEOUT: int = get_int("HTTP_CONNECT_TIMEOUT", 2)
+    HTTP_READ_TIMEOUT: int = Field(default_factory=lambda: get_int("HTTP_READ_TIMEOUT", 120))
+    HTTP_WRITE_TIMEOUT: int = Field(default_factory=lambda: get_int("HTTP_WRITE_TIMEOUT", 10))
+    HTTP_CONNECT_TIMEOUT: int = Field(default_factory=lambda: get_int("HTTP_CONNECT_TIMEOUT", 2))
 
     # Messaging integration (Telegram / Discord)
-    MESSAGING_PLATFORM: str = os.getenv("MESSAGING_PLATFORM", "discord")
-    MESSAGING_RATE_LIMIT: int = get_int("MESSAGING_RATE_LIMIT", 1)
-    MESSAGING_RATE_WINDOW: int = get_int("MESSAGING_RATE_WINDOW", 1)
+    MESSAGING_PLATFORM: str = Field(default_factory=lambda: os.getenv("MESSAGING_PLATFORM", "discord"))
+    MESSAGING_RATE_LIMIT: int = Field(default_factory=lambda: get_int("MESSAGING_RATE_LIMIT", 1))
+    MESSAGING_RATE_WINDOW: int = Field(default_factory=lambda: get_int("MESSAGING_RATE_WINDOW", 1))
 
     # Voice Note Transcription options
-    VOICE_NOTE_ENABLED: bool = get_bool("VOICE_NOTE_ENABLED", False)
-    WHISPER_DEVICE: str = os.getenv("WHISPER_DEVICE", "nvidia_nim")
-    WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "openai/whisper-large-v3")
-    HF_TOKEN: str = os.getenv("HF_TOKEN", "")
+    VOICE_NOTE_ENABLED: bool = Field(default_factory=lambda: get_bool("VOICE_NOTE_ENABLED", False))
+    WHISPER_DEVICE: str = Field(default_factory=lambda: os.getenv("WHISPER_DEVICE", "nvidia_nim"))
+    WHISPER_MODEL: str = Field(default_factory=lambda: os.getenv("WHISPER_MODEL", "openai/whisper-large-v3"))
+    HF_TOKEN: str = Field(default_factory=lambda: os.getenv("HF_TOKEN", ""))
 
     # Telegram Specific config
-    TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    ALLOWED_TELEGRAM_USER_ID: str = os.getenv("ALLOWED_TELEGRAM_USER_ID", "")
+    TELEGRAM_BOT_TOKEN: str = Field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
+    ALLOWED_TELEGRAM_USER_ID: str = Field(default_factory=lambda: os.getenv("ALLOWED_TELEGRAM_USER_ID", ""))
 
     # Discord Specific config
-    DISCORD_BOT_TOKEN: str = os.getenv("DISCORD_BOT_TOKEN", "")
-    ALLOWED_DISCORD_CHANNELS: str = os.getenv("ALLOWED_DISCORD_CHANNELS", "")
+    DISCORD_BOT_TOKEN: str = Field(default_factory=lambda: os.getenv("DISCORD_BOT_TOKEN", ""))
+    ALLOWED_DISCORD_CHANNELS: str = Field(default_factory=lambda: os.getenv("ALLOWED_DISCORD_CHANNELS", ""))
 
     # Agent / Mock configurations
-    CLAUDE_WORKSPACE: str = os.getenv("CLAUDE_WORKSPACE", "./agent_workspace")
-    ALLOWED_DIR: str = os.getenv("ALLOWED_DIR", "")
-    FAST_PREFIX_DETECTION: bool = get_bool("FAST_PREFIX_DETECTION", True)
-    ENABLE_NETWORK_PROBE_MOCK: bool = get_bool("ENABLE_NETWORK_PROBE_MOCK", True)
-    ENABLE_TITLE_GENERATION_SKIP: bool = get_bool("ENABLE_TITLE_GENERATION_SKIP", True)
-    ENABLE_SUGGESTION_MODE_SKIP: bool = get_bool("ENABLE_SUGGESTION_MODE_SKIP", True)
-    ENABLE_FILEPATH_EXTRACTION_MOCK: bool = get_bool(
-        "ENABLE_FILEPATH_EXTRACTION_MOCK", True
-    )
-    ENABLE_STOP_HOOK_MOCK: bool = get_bool("ENABLE_STOP_HOOK_MOCK", True)
+    CLAUDE_WORKSPACE: str = Field(default_factory=lambda: os.getenv("CLAUDE_WORKSPACE", "./agent_workspace"))
+    ALLOWED_DIR: str = Field(default_factory=lambda: os.getenv("ALLOWED_DIR", ""))
+    FAST_PREFIX_DETECTION: bool = Field(default_factory=lambda: get_bool("FAST_PREFIX_DETECTION", True))
+    ENABLE_NETWORK_PROBE_MOCK: bool = Field(default_factory=lambda: get_bool("ENABLE_NETWORK_PROBE_MOCK", True))
+    ENABLE_TITLE_GENERATION_SKIP: bool = Field(default_factory=lambda: get_bool("ENABLE_TITLE_GENERATION_SKIP", True))
+    ENABLE_SUGGESTION_MODE_SKIP: bool = Field(default_factory=lambda: get_bool("ENABLE_SUGGESTION_MODE_SKIP", True))
+    ENABLE_FILEPATH_EXTRACTION_MOCK: bool = Field(default_factory=lambda: get_bool("ENABLE_FILEPATH_EXTRACTION_MOCK", True))
+    ENABLE_STOP_HOOK_MOCK: bool = Field(default_factory=lambda: get_bool("ENABLE_STOP_HOOK_MOCK", True))
 
     # Server options
-    RELOAD: bool = get_bool("RELOAD", False)
+    RELOAD: bool = Field(default_factory=lambda: get_bool("RELOAD", False))
 
-    # Thinking directive modes per model: "inherit" (native), "open" (force think tags), "close" (suppress think tags)
-    THINKING_MODE_OPUS: str = os.getenv("THINKING_MODE_OPUS", "inherit")
-    THINKING_MODE_SONNET: str = os.getenv("THINKING_MODE_SONNET", "inherit")
-    THINKING_MODE_HAIKU: str = os.getenv("THINKING_MODE_HAIKU", "inherit")
-    THINKING_MODE_DEFAULT: str = os.getenv("THINKING_MODE_DEFAULT", "inherit")
+    # Thinking directive modes per model
+    THINKING_MODE_OPUS: str = Field(default_factory=lambda: os.getenv("THINKING_MODE_OPUS", "inherit"))
+    THINKING_MODE_SONNET: str = Field(default_factory=lambda: os.getenv("THINKING_MODE_SONNET", "inherit"))
+    THINKING_MODE_HAIKU: str = Field(default_factory=lambda: os.getenv("THINKING_MODE_HAIKU", "inherit"))
+    THINKING_MODE_DEFAULT: str = Field(default_factory=lambda: os.getenv("THINKING_MODE_DEFAULT", "inherit"))
 
     def get_thinking_mode(self, client_model: str) -> str:
         lower = client_model.lower()
@@ -619,6 +634,7 @@ class Settings:
         self.NVIDIA_NIM_API_KEYS = _get_secret_or_env("NVIDIA_NIM_API_KEYS", "")
         self.NVIDIA_NIM_API_KEY = _get_secret_or_env("NVIDIA_NIM_API_KEY", "")
         self.OPENROUTER_API_KEY = _get_secret_or_env("OPENROUTER_API_KEY", "")
+        self.TOKENROUTER_API_KEY = _get_secret_or_env("TOKENROUTER_API_KEY", "")
         self.GATEWAY_AUTH_TOKEN = _get_secret_or_env("GATEWAY_AUTH_TOKEN", "")
         self.MISTRAL_API_KEY = _get_secret_or_env("MISTRAL_API_KEY", "")
         self.GEMINI_API_KEY = _get_secret_or_env("GEMINI_API_KEY", "")
@@ -628,48 +644,23 @@ class Settings:
         self.FIREWORKS_API_KEY = _get_secret_or_env("FIREWORKS_API_KEY", "")
         self.KIMI_API_KEY = _get_secret_or_env("KIMI_API_KEY", "")
 
-        self.NVIDIA_NIM_BASE_URL = os.getenv(
-            "NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"
-        )
-        self.OPENROUTER_BASE_URL = os.getenv(
-            "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
-        )
-        self.MISTRAL_BASE_URL = os.getenv(
-            "MISTRAL_BASE_URL", "https://api.mistral.ai/v1"
-        )
-        self.GEMINI_BASE_URL = os.getenv(
-            "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"
-        )
-        self.GROQ_BASE_URL = os.getenv(
-            "GROQ_BASE_URL", "https://api.groq.com/openai/v1"
-        )
-        self.DEEPSEEK_BASE_URL = os.getenv(
-            "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
-        )
-        self.CEREBRAS_BASE_URL = os.getenv(
-            "CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"
-        )
-        self.FIREWORKS_BASE_URL = os.getenv(
-            "FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1"
-        )
-        self.LM_STUDIO_BASE_URL = os.getenv(
-            "LM_STUDIO_BASE_URL", "http://localhost:1234/v1"
-        )
-        self.LLAMA_CPP_BASE_URL = os.getenv(
-            "LLAMA_CPP_BASE_URL", "http://localhost:8080/v1"
-        )
+        self.NVIDIA_NIM_BASE_URL = os.getenv("NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1")
+        self.OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        self.TOKENROUTER_BASE_URL = os.getenv("TOKENROUTER_BASE_URL", "https://api.tokenrouter.com/v1")
+        self.MISTRAL_BASE_URL = os.getenv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1")
+        self.GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta")
+        self.GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+        self.DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+        self.CEREBRAS_BASE_URL = os.getenv("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1")
+        self.FIREWORKS_BASE_URL = os.getenv("FIREWORKS_BASE_URL", "https://api.fireworks.ai/inference/v1")
+        self.LM_STUDIO_BASE_URL = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234/v1")
+        self.LLAMA_CPP_BASE_URL = os.getenv("LLAMA_CPP_BASE_URL", "http://localhost:8080/v1")
         self.OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
         self.MODEL_OPUS = os.getenv("MODEL_OPUS", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
-        self.MODEL_SONNET = os.getenv(
-            "MODEL_SONNET", "nvidia_nim/meta/llama-3.1-70b-instruct"
-        )
-        self.MODEL_SONNET_1M = os.getenv(
-            "MODEL_SONNET_1M", "open_router/meta-llama/llama-3.3-70b-instruct"
-        )
-        self.MODEL_HAIKU = os.getenv(
-            "MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct"
-        )
+        self.MODEL_SONNET = os.getenv("MODEL_SONNET", "nvidia_nim/meta/llama-3.1-70b-instruct")
+        self.MODEL_SONNET_1M = os.getenv("MODEL_SONNET_1M", "open_router/meta-llama/llama-3.3-70b-instruct")
+        self.MODEL_HAIKU = os.getenv("MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct")
         self.MODEL = os.getenv("MODEL", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
 
         self.REFRESH_TIME = get_int("REFRESH_TIME", 4)
@@ -706,13 +697,9 @@ class Settings:
         self.ALLOWED_DIR = os.getenv("ALLOWED_DIR", "")
         self.FAST_PREFIX_DETECTION = get_bool("FAST_PREFIX_DETECTION", True)
         self.ENABLE_NETWORK_PROBE_MOCK = get_bool("ENABLE_NETWORK_PROBE_MOCK", True)
-        self.ENABLE_TITLE_GENERATION_SKIP = get_bool(
-            "ENABLE_TITLE_GENERATION_SKIP", True
-        )
+        self.ENABLE_TITLE_GENERATION_SKIP = get_bool("ENABLE_TITLE_GENERATION_SKIP", True)
         self.ENABLE_SUGGESTION_MODE_SKIP = get_bool("ENABLE_SUGGESTION_MODE_SKIP", True)
-        self.ENABLE_FILEPATH_EXTRACTION_MOCK = get_bool(
-            "ENABLE_FILEPATH_EXTRACTION_MOCK", True
-        )
+        self.ENABLE_FILEPATH_EXTRACTION_MOCK = get_bool("ENABLE_FILEPATH_EXTRACTION_MOCK", True)
         self.ENABLE_STOP_HOOK_MOCK = get_bool("ENABLE_STOP_HOOK_MOCK", True)
         self.RELOAD = get_bool("RELOAD", False)
         self.THINKING_MODE_OPUS = os.getenv("THINKING_MODE_OPUS", "inherit")

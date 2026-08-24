@@ -50,6 +50,9 @@ class OpenAICompatibleProvider(BaseProvider):
                 "https://github.com/bekirin50tonu/Claude-Code-Proxy"
             )
             extra_headers["X-Title"] = "Claude Code Proxy"
+        elif provider_part == "tokenrouter":
+            base_url = settings.TOKENROUTER_BASE_URL
+            api_key = await _select_key(settings.TOKENROUTER_API_KEY, "tokenrouter")
         elif provider_part == "groq":
             base_url = settings.GROQ_BASE_URL
             api_key = await _select_key(settings.GROQ_API_KEY, "groq")
