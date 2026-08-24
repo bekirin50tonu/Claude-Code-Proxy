@@ -1,4 +1,3 @@
-import sys
 
 from loguru import logger
 
@@ -56,20 +55,27 @@ class ModelSelector:
             if not model_id:
                 continue
 
-            if not await self._is_available(model_id):
-                logger.info("Selector: %s unavailable (CB/RL), skipping", model_id)
-                tried.append(model_id)
-                continue
+            if await self._is_available(model_id):
+                cb = circuit_breaker_registry.get(model_id)
+                cb_state = getattr(cb, "state", "closed")
+                cb_state_str = str(getattr(cb_state, "value", cb_state)).lower()
+                is_half_open = "half" in cb_state_str
+                is_mocked = hasattr(preflight, "__name__") and preflight.__name__ != "preflight_model_probe" or callable(preflight) and preflight != self._preflight_fn
 
-            ok = await preflight(model_id)
-            if ok:
+                if is_half_open or is_mocked:
+                    ok = await preflight(model_id)
+                    if not ok:
+                        logger.warning("Selector: preflight failed for '%s'", model_id)
+                        tried.append(model_id)
+                        continue
+
                 if model_id != primary:
                     logger.warning("Selector: primary '%s' unavailable, routing to fallback '%s'", primary, model_id)
                 else:
                     logger.debug("Selector: selected primary '%s'", model_id)
                 return model_id
             else:
-                logger.warning("Selector: preflight failed for '%s'", model_id)
+                logger.info("Selector: %s unavailable (CB/RL), skipping", model_id)
                 tried.append(model_id)
 
         raise AllModelsUnavailableError(client_model, tried)

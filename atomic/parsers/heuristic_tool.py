@@ -100,9 +100,10 @@ class HeuristicToolParser(BaseAtomicParser):
             func_name = self.unmask_code_generics(func_name)
 
             params: dict[str, Any] = {}
-            param_matches = re.findall(r"(?:<<|#<|<)?parameter=([\w_]+)>>?(.*?)</parameter>", body, re.DOTALL)
+            param_matches = re.findall(r"(?:<<|#<|<)?parameter=([\w_]+)>>?(.*?)(?=(?:(?:<<|#<|<)?parameter=|\Z))", body, re.DOTALL)
             for p_name, p_val in param_matches:
-                params[p_name.strip()] = self.unmask_code_generics(p_val.strip())
+                clean_val = re.sub(r"</parameter>.*$", "", p_val, flags=re.DOTALL).strip()
+                params[p_name.strip()] = self.unmask_code_generics(clean_val)
 
             # Fallback if body contains JSON
             if not params and "{" in body:
@@ -247,9 +248,10 @@ class HeuristicToolParser(BaseAtomicParser):
                 func_name = self.unmask_code_generics(xml_match.group(1).strip())
                 body = xml_match.group(2)
                 params: dict[str, Any] = {}
-                param_matches = re.findall(r"(?:<<|#<|<)?parameter=([\w_]+)>>?(.*?)</parameter>", body, re.DOTALL)
+                param_matches = re.findall(r"(?:<<|#<|<)?parameter=([\w_]+)>>?(.*?)(?=(?:(?:<<|#<|<)?parameter=|\Z))", body, re.DOTALL)
                 for p_name, p_val in param_matches:
-                    params[p_name.strip()] = self.unmask_code_generics(p_val.strip())
+                    clean_val = re.sub(r"</parameter>.*$", "", p_val, flags=re.DOTALL).strip()
+                    params[p_name.strip()] = self.unmask_code_generics(clean_val)
                 t_id = f"toolu_{uuid.uuid4().hex[:10]}"
                 t_idx = self._get_next_index()
                 events.append(ModelConverter.build_sse_block_start(t_idx, "tool_use", {"id": t_id, "name": func_name}))

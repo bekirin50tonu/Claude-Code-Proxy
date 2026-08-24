@@ -1,7 +1,9 @@
 """Upstream model execution and candidate failover loop for Core Gateway."""
 
+import sys
 from collections.abc import AsyncGenerator
 from typing import Any
+
 from fastapi import Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from loguru import logger
@@ -10,14 +12,13 @@ from atomic.guards.nim_guard import nim_throttle_guard
 from atomic.guards.stream_guard import guarded
 from atomic.guards.token_budget import TokenBudgetGuard
 from config import settings, stats
+from core.gateway.stream_handler import record_request_log
 from core.interceptor.json_repair import JSONRepairNormalizer
 from core.router.selector import model_selector
 from core.transformer.stream_engine import StreamEngine, translate_non_stream_response
 from providers.openai import OpenAICompatibleProvider
 from shared.exceptions import NimQueueTimeoutError
-from core.gateway.stream_handler import record_request_log
 
-import sys
 provider = OpenAICompatibleProvider()
 
 
@@ -70,6 +71,7 @@ async def try_models(
     is_stop_hook = JSONRepairNormalizer.is_stop_hook_target(body)
 
     for mapped_model in candidates:
+        concurrency_decremented = False
         if not await model_selector._is_available(mapped_model):
             tried_models.append(mapped_model)
             attempt_history.append({
@@ -119,6 +121,8 @@ async def try_models(
                     active_nim_cm = nim_cm if nim_acquired else None
                     nim_acquired = False  # Ownership passed to generator finally block
 
+                    concurrency_decremented = False
+
                     async def _record_after_stream(
                         target_stream=guarded_stream,
                         target_model=mapped_model,
@@ -138,6 +142,7 @@ async def try_models(
                             )
                             logger.error("Stream error for '%s': %s", target_model, exc)
                         finally:
+                            stats.active_concurrency -= 1
                             if nim_ctx:
                                 await nim_ctx.__aexit__(None, None, None)
                             record_request_log(
@@ -154,6 +159,7 @@ async def try_models(
                                 attempt_history=attempt_history,
                             )
 
+                    concurrency_decremented = True
                     return StreamingResponse(
                         _record_after_stream(),
                         media_type="text/event-stream",
@@ -245,7 +251,8 @@ async def try_models(
         finally:
             if nim_acquired and nim_cm:
                 await nim_cm.__aexit__(None, None, None)
-            stats.active_concurrency -= 1
+            if not concurrency_decremented:
+                stats.active_concurrency -= 1
 
     stats.error_count += 1
     err_details = {

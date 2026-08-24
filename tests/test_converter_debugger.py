@@ -5,8 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from atomic.parsers.auto_close_tag import AutoCloseTagParser
-from atomic.parsers.heuristic_tool import HeuristicToolStatefulParser
 from atomic.sanitizers.rtk_compressor import RedundantTokenKiller
 from config.config import ClaudeSettingsManager
 from converter_debugger import ConverterDebugger

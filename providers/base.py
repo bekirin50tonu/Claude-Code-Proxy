@@ -136,6 +136,9 @@ class BaseProvider(ABC):
                         raw_openai_messages.append({"role": "user", "content": content_str})
                     if tool_results:
                         raw_openai_messages.extend(tool_results)
+                elif role_str == "system":
+                    if content_str:
+                        raw_openai_messages.append({"role": "system", "content": content_str})
 
         # ---------------------------------------------------------------------
         # Post-Processing Pass: Synthetic Tool Call Injection & Schema Fixing
@@ -193,7 +196,9 @@ class BaseProvider(ABC):
                 if not msg.get("content"):
                     msg["content"] = "Tool execution completed."
 
-            final_messages.append(msg)
+                final_messages.append(msg)
+            else:
+                final_messages.append(msg)
 
         # Clean up empty content fields on assistant messages with tool_calls
         for msg in final_messages:

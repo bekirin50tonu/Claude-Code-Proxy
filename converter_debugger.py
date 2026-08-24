@@ -6,8 +6,6 @@ automated .claude/settings.json synchronization.
 """
 
 import asyncio
-import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -21,7 +19,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from atomic.parsers.auto_close_tag import AutoCloseTagParser
 from atomic.parsers.heuristic_tool import HeuristicToolStatefulParser
-from atomic.parsers.thinking import ThinkingStatefulParser
 from atomic.sanitizers.rtk_compressor import RedundantTokenKiller
 from config.config import ClaudeSettingsManager
 from core.transformer.stream_engine import StreamEngine

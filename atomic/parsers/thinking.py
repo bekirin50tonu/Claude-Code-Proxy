@@ -75,8 +75,8 @@ class ThinkingParser(BaseAtomicParser):
 
         self.buffer += text
 
-        if self.buffer.startswith("<think</think"):
-            self.buffer = self.buffer[len("<think</think") :]
+        if self.buffer.startswith("<think></think>"):
+            self.buffer = self.buffer[len("<think></think>") :]
 
         while self.buffer:
             if not self.in_think_tag:
@@ -84,13 +84,6 @@ class ThinkingParser(BaseAtomicParser):
                 if match:
                     think_start = match.start()
                     think_end_tag = match.end()
-                    prefix = self.buffer[:think_start]
-                    if prefix:
-                        # Strip orphan list numbers / backtick artifacts (e.g. "9`)\n" or "4`)\n") before <think>
-                        clean_prefix = re.sub(r"^\s*\d+[`\)]*\s*", "", prefix).strip()
-                        if clean_prefix:
-                            clean_text_parts.append(clean_prefix)
-
                     idx = self._ensure_block("thinking", events)
                     self.in_think_tag = True
                     self.buffer = self.buffer[think_end_tag:]

@@ -1,11 +1,12 @@
 """Unit tests for TokenRouter provider integration."""
 
 from unittest.mock import AsyncMock, patch
+
 import pytest
-from fastapi.testclient import TestClient
+
+from atomic.guards.preflight import _resolve_url_and_headers
 from config import settings
 from providers.openai import OpenAICompatibleProvider
-from atomic.guards.preflight import _resolve_url_and_headers
 
 
 def test_tokenrouter_settings_defaults():

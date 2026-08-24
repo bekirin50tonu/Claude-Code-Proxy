@@ -1,14 +1,13 @@
 """Claude Code Settings Bridge — Unified configuration bridge between Claude Code CLI and local proxy."""
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-USER_SETTINGS_PATH = Path.home() / ".claude.json"
-PROJECT_SETTINGS_PATH = Path.cwd() / ".claude.json"
+USER_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
+PROJECT_SETTINGS_PATH = Path.cwd() / ".claude" / "settings.json"
 
 
 class ClaudeSettingsManager:
@@ -43,7 +42,11 @@ class ClaudeSettingsManager:
     def set_setting(self, key: str, value: Any, scope: str = "project") -> bool:
         target_path = USER_SETTINGS_PATH if scope.lower() == "user" else PROJECT_SETTINGS_PATH
         cfg = self._read_json(target_path)
-        cfg[key] = value
+        if key == "env" and isinstance(value, dict):
+            cfg["env"] = cfg.get("env", {})
+            cfg["env"].update(value)
+        else:
+            cfg[key] = value
         return self._write_json(target_path, cfg)
 
     def sync_proxy_to_claude(self) -> dict[str, Any]:

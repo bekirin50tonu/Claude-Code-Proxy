@@ -179,6 +179,8 @@ class TokenBudgetGuard:
                 break
             removed = truncated.pop(0)
             was_truncated = True
+            while truncated and truncated[0].get("role") != "user":
+                truncated.pop(0)
             logger.debug("TokenBudget: removed '%s' message", removed.get("role"))
 
         total = self.count_total_tokens(truncated, system, max_tokens)

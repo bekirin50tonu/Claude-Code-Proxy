@@ -353,6 +353,7 @@ class StreamEngine:
         self.active_tool_id: str | None = None
         self.active_tool_name: str | None = None
         self.tool_state_map: dict[int, dict[str, Any]] = {}
+        self.initial_pre_think_buffer: str = ""
 
     def _next_block_index(self) -> int:
         self.block_index += 1
@@ -452,6 +453,7 @@ class StreamEngine:
             # 1. Native reasoning_content
             reasoning = delta.get("reasoning_content") or ""
             if reasoning:
+                self.initial_pre_think_buffer = ""
                 import asyncio
 
                 from bot.live_bridge import live_bridge_manager
@@ -517,8 +519,20 @@ class StreamEngine:
             # 3. Content deltas (Linear Sequential Pipeline: Thinking -> HeuristicTool -> Text)
             content = delta.get("content") or ""
             if content:
+                if self.block_index == -1 and not self.accumulated_thinking:
+                    if "<think" in content.lower() or "<thought" in content.lower():
+                        self.initial_pre_think_buffer = ""
+                    else:
+                        self.initial_pre_think_buffer += content
+                        if len(self.initial_pre_think_buffer) < 500:
+                            continue
+                        else:
+                            content = self.initial_pre_think_buffer
+                            self.initial_pre_think_buffer = ""
+
                 think_events, clean_text = await self.thinking_parser.process_chunk_pipeline(content)
                 if think_events:
+                    self.initial_pre_think_buffer = ""
                     for ev in think_events:
                         if hasattr(ev, "delta"):
                             dtype = getattr(ev.delta, "type", None)
@@ -541,7 +555,7 @@ class StreamEngine:
                         for ev in tool_events:
                             if hasattr(ev, "content_block") and getattr(ev.content_block, "type", None) == "tool_use":
                                 self.text_or_tool_emitted = True
-                                cb = getattr(ev, "content_block")
+                                cb = ev.content_block
                                 self._current_heuristic_tc = {
                                     "type": "tool_use",
                                     "id": getattr(cb, "id", f"toolu_{uuid.uuid4().hex[:10]}"),
@@ -579,6 +593,16 @@ class StreamEngine:
                                 live_bridge_manager.dispatch_text_chunk(self.session.session_id, remaining_text)
                             )
                         yield AnthropicSSEFormatter.text_delta(remaining_text, self._get_current_index())
+
+        if self.initial_pre_think_buffer:
+            clean_text = self.initial_pre_think_buffer
+            self.initial_pre_think_buffer = ""
+            if self.current_block_type != "text":
+                idx = self._next_block_index()
+                yield AnthropicSSEFormatter.text_start(idx)
+                self.current_block_type = "text"
+            yield AnthropicSSEFormatter.text_delta(clean_text, self._get_current_index())
+            self.accumulated_text.append(clean_text)
 
         # Flush Thinking Parser
         for flush_ev in await self.thinking_parser.flush():
