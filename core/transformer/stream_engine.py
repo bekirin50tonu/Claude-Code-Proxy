@@ -666,7 +666,7 @@ class StreamEngine:
                 finish_reason = "tool_calls"
                 self.text_or_tool_emitted = True
 
-        if finish_reason == "tool_calls" or self.accumulated_tool_calls:
+        if bool(self.accumulated_tool_calls):
             stop_reason = "tool_use"
         elif finish_reason == "length":
             stop_reason = "max_tokens"

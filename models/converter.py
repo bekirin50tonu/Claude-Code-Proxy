@@ -265,7 +265,8 @@ class ModelConverter:
             blocks.append(AnthropicContentBlock(type="text", text=""))
 
         finish_reason = choice.get("finish_reason", "stop")
-        if finish_reason == "tool_calls" or tool_calls or has_tool_block:
+        has_tool_block = any(getattr(b, "type", None) == "tool_use" or (isinstance(b, dict) and b.get("type") == "tool_use") for b in blocks)
+        if has_tool_block:
             stop_reason = "tool_use"
         elif finish_reason == "length":
             stop_reason = "max_tokens"

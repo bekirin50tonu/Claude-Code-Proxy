@@ -341,8 +341,6 @@ class JSONRepairNormalizer:
                         if "input" in block and isinstance(block["input"], dict):
                             from atomic.guards.subagent import subagent_guard
                             block["input"] = await subagent_guard.enforce_tool_call(tname, block["input"], enabled=subagents_enabled)
-                            if any(kw in tname.lower() for kw in cls.TARGET_KEYWORDS):
-                                block["input"] = await cls.normalize_stop_hook_schema(block["input"])
 
             data["content"] = content_list
 
