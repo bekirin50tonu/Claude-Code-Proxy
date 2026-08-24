@@ -1,12 +1,14 @@
 """BaseHandler abstract class defining the gateway request lifecycle."""
 
-from abc import ABC, abstractmethod
 import time
+from abc import ABC, abstractmethod
 from typing import Any
+
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
+
 from config import stats
-from core.gateway.auth import check_auth, auth_error_response
+from core.gateway.auth import auth_error_response, check_auth
 from core.gateway.rate_limit import gateway_rate_limiter
 from core.gateway.stream_handler import record_request_log
 

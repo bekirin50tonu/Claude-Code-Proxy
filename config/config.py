@@ -869,8 +869,9 @@ class ProxyStats:
 
         # Broadcast real-time WebSocket event to active dashboard clients
         try:
-            from api.websocket_manager import ws_manager
             import asyncio
+
+            from api.websocket_manager import ws_manager
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(ws_manager.broadcast_event("request_captured", entry.to_dict(include_payload=True)))

@@ -42,6 +42,7 @@ MANIFEST
 
 # Development files
 .development/
+.claude_shortcut
 
 # Pytest & Code Quality Caches
 .pytest_cache/

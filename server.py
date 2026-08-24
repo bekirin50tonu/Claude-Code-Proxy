@@ -1,21 +1,22 @@
-from collections.abc import AsyncGenerator
+import asyncio
 import contextlib
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from api.dashboard import router as dashboard_router
 from api.mcp import mcp_router
+from api.metrics import metrics_router
 from bot import start_all_bots, stop_all_bots
 from core.gateway import router as api_router
 from core.interceptor import JSONRepairMiddleware
-
-
-from api.metrics import metrics_router
 
 
 @asynccontextmanager
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown lifecycles."""
     import os
     import signal
+
     from config import model_registry, settings, stats
 
     logger.info("Initializing Claude Code Proxy Server...")

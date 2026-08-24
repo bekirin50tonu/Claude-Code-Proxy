@@ -2,22 +2,35 @@
 
 import time
 from typing import Any
+
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from api.mock import check_mock_request
 from atomic.guards.token_budget import TokenBudgetGuard
 from config import settings, stats
+from core.gateway.auth import auth_error_response as _auth_error_response
+from core.gateway.auth import check_auth as _check_auth
+from core.gateway.fallback_loop import _get_provider, provider, try_models
+from core.gateway.model_select import pick_model_with_fallbacks
+from core.gateway.prompt_inject import inject_telegram_prompts
+from core.gateway.prompt_inject import (
+    sanitize_telegram_prompt as _sanitize_telegram_prompt,
+)
+from core.gateway.rate_limit import (
+    SlidingWindowRateLimiter,
+    concurrency_semaphore,
+    gateway_rate_limiter,
+    rate_limiter,
+)
+from core.gateway.stream_handler import (
+    log_after_stream,
+    record_request_log,
+    stream_mock_response,
+)
 from core.router.selector import AllModelsUnavailableError, model_selector
 from core.transformer.stream_engine import translate_non_stream_response
 from providers.openai import OpenAICompatibleProvider
-
-from core.gateway.auth import check_auth as _check_auth, auth_error_response as _auth_error_response
-from core.gateway.rate_limit import SlidingWindowRateLimiter, gateway_rate_limiter, rate_limiter, concurrency_semaphore
-from core.gateway.prompt_inject import sanitize_telegram_prompt as _sanitize_telegram_prompt, inject_telegram_prompts
-from core.gateway.stream_handler import record_request_log, log_after_stream, stream_mock_response
-from core.gateway.model_select import pick_model_with_fallbacks
-from core.gateway.fallback_loop import try_models, provider, _get_provider
 
 model_router = model_selector
 router = APIRouter()

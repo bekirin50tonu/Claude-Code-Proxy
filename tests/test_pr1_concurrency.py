@@ -2,11 +2,12 @@
 
 import asyncio
 import os
+
 import pytest
 
 from core.gateway import SlidingWindowRateLimiter
+from core.router.circuit_breaker import STORAGE_FILE, circuit_breaker_registry
 from providers.openai import _select_key
-from core.router.circuit_breaker import circuit_breaker_registry, STORAGE_FILE
 
 
 @pytest.mark.asyncio

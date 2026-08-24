@@ -1,8 +1,10 @@
 """Gateway authentication verification and error response helpers."""
 
 import sys
+
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
+
 from config import settings
 
 

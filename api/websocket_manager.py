@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 from loguru import logger
 
 
@@ -79,7 +79,7 @@ class DashboardWebSocketManager:
 
     async def _build_initial_snapshot(self) -> dict[str, Any]:
         """Gather current snapshot state across proxy modules."""
-        from config import settings, stats
+        from config import stats
         from core.router.daily_tracker import daily_request_tracker
         from core.router.selector import model_selector
 

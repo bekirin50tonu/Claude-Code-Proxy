@@ -1,6 +1,7 @@
 """Prometheus Metrics & Operational Health Probe Router."""
 
 import time
+
 from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse
 

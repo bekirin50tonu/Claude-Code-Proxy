@@ -4,7 +4,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.mcp import execute_mcp_tool
-from api.settings_manager import claude_settings_manager
 from atomic.guards.subagent_policy import subagent_policy_engine
 from core.interceptor.prompt_queue import prompt_queue_manager
 from server import app
