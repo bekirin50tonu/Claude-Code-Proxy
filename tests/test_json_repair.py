@@ -17,19 +17,29 @@ async def test_is_stop_hook_target_detection() -> None:
     }
     assert JSONRepairNormalizer.is_stop_hook_target(payload_msg) is True
 
-    # 2. Target in system prompt
+    # 2. System prompt instructions alone should NOT force stop hook schema
     payload_sys = {
         "messages": [{"role": "user", "content": "Hello"}],
         "system": "System instructions: Handle stop_hook requests carefully.",
     }
-    assert JSONRepairNormalizer.is_stop_hook_target(payload_sys) is True
+    assert JSONRepairNormalizer.is_stop_hook_target(payload_sys) is False
 
-    # 3. Target in tools definition
+    # 3. Target in tools definition without coding tools
     payload_tool = {
-        "messages": [{"role": "user", "content": "Hello"}],
+        "messages": [{"role": "user", "content": "Execute stop hook"}],
         "tools": [{"name": "exit_session", "description": "Exit session and save memory"}],
     }
     assert JSONRepairNormalizer.is_stop_hook_target(payload_tool) is True
+
+    # 3b. Agentic tools present (Bash, Read, Write, Edit) should NEVER be stop hook targets
+    payload_agentic = {
+        "messages": [{"role": "user", "content": "projeyi incele"}],
+        "tools": [
+            {"name": "Bash", "description": "Execute bash command"},
+            {"name": "exit_session", "description": "Exit session"},
+        ],
+    }
+    assert JSONRepairNormalizer.is_stop_hook_target(payload_agentic) is False
 
     # 4. Sensitive edit operations (standard edit request should NOT force stop hook JSON schema)
     payload_edit = {

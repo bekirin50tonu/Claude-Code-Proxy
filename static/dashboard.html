@@ -111,6 +111,10 @@
                             <span id="count-open_router" style="font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #ffffff;">...</span>
                         </div>
                         <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); padding: 0.5rem 0.8rem; border-radius: 6px; font-size: 0.72rem; display: flex; align-items: center; gap: 6px;">
+                            <span style="color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 0.65rem;">TokenRouter:</span>
+                            <span id="count-tokenrouter" style="font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #ffffff;">...</span>
+                        </div>
+                        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-subtle); padding: 0.5rem 0.8rem; border-radius: 6px; font-size: 0.72rem; display: flex; align-items: center; gap: 6px;">
                             <span style="color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 0.65rem;">Groq:</span>
                             <span id="count-groq" style="font-weight: 800; font-family: 'JetBrains Mono', monospace; color: #ffffff;">...</span>
                         </div>
@@ -796,6 +800,7 @@
                         <div style="display: flex; gap: 0.4rem; margin-bottom: 1.25rem; flex-wrap: wrap; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.75rem;">
                             <button type="button" class="btn-alt provider-tab-btn active" id="ptab-btn-nvidia_nim" onclick="switchProviderTab('nvidia_nim')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem; border-color: #eab308; background: rgba(234, 179, 8, 0.15); color: #ffffff; font-weight: 700;">NVIDIA NIM</button>
                             <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-open_router" onclick="switchProviderTab('open_router')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">OpenRouter</button>
+                            <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-tokenrouter" onclick="switchProviderTab('tokenrouter')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">TokenRouter</button>
                             <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-gemini" onclick="switchProviderTab('gemini')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">Google Gemini</button>
                             <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-groq" onclick="switchProviderTab('groq')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">Groq</button>
                             <button type="button" class="btn-alt provider-tab-btn" id="ptab-btn-deepseek" onclick="switchProviderTab('deepseek')" style="padding: 0.4rem 0.8rem; font-size: 0.72rem;">DeepSeek</button>
@@ -894,6 +899,51 @@
                                 <div class="form-group">
                                     <label for="PROVIDER_OPEN_ROUTER_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
                                     <input type="number" id="PROVIDER_OPEN_ROUTER_HTTP_CONNECT_TIMEOUT">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="ptab-card-tokenrouter" class="provider-tab-card" style="display: none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 700; color: white; margin-bottom: 0.75rem;">TokenRouter Specific Settings</h4>
+                            <div class="form-grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+                                <div class="form-group">
+                                    <label for="PROVIDER_TOKENROUTER_RPM">RPM Limit (Requests / Window)</label>
+                                    <input type="number" id="PROVIDER_TOKENROUTER_RPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_TOKENROUTER_TPM">TPM Limit (Tokens / Window)</label>
+                                    <input type="number" id="PROVIDER_TOKENROUTER_TPM">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_TOKENROUTER_RPD">RPD Limit (Requests / Day)</label>
+                                    <input type="number" id="PROVIDER_TOKENROUTER_RPD">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_TOKENROUTER_RATE_WINDOW">Rate Window (seconds)</label>
+                                    <input type="number" id="PROVIDER_TOKENROUTER_RATE_WINDOW">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_TOKENROUTER_MAX_CONCURRENCY">Max Concurrent Connections</label>
+                                    <input type="number" id="PROVIDER_TOKENROUTER_MAX_CONCURRENCY">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_TOKENROUTER_CONTEXT">Context Window Tokens</label>
+                                    <input type="number" id="PROVIDER_TOKENROUTER_CONTEXT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_TOKENROUTER_MAX_OUTPUT">Max Output Tokens</label>
+                                    <input type="number" id="PROVIDER_TOKENROUTER_MAX_OUTPUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_TOKENROUTER_HTTP_READ_TIMEOUT">HTTP Read Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_TOKENROUTER_HTTP_READ_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_TOKENROUTER_HTTP_WRITE_TIMEOUT">HTTP Write Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_TOKENROUTER_HTTP_WRITE_TIMEOUT">
+                                </div>
+                                <div class="form-group">
+                                    <label for="PROVIDER_TOKENROUTER_HTTP_CONNECT_TIMEOUT">HTTP Connect Timeout (seconds)</label>
+                                    <input type="number" id="PROVIDER_TOKENROUTER_HTTP_CONNECT_TIMEOUT">
                                 </div>
                             </div>
                         </div>

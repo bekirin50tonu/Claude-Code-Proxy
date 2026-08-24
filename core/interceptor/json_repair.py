@@ -51,6 +51,17 @@ class JSONRepairNormalizer:
         # 1. Inspect tools definition
         tools = payload.get("tools")
         if isinstance(tools, list) and len(tools) > 0:
+            coding_tool_names = {"bash", "read", "write", "edit", "glob", "grep", "notebookcell", "task"}
+            has_coding_tools = False
+            for t in tools:
+                if isinstance(t, dict):
+                    t_name = str(t.get("name", "")).lower()
+                    if t_name in coding_tool_names or any(c in t_name for c in ("bash", "read", "write", "edit")):
+                        has_coding_tools = True
+                        break
+            if has_coding_tools:
+                return False
+
             has_stop_hook_tool = False
             for t in tools:
                 if isinstance(t, dict):
@@ -86,10 +97,10 @@ class JSONRepairNormalizer:
                 str(b.get("text", "")) for b in system if isinstance(b, dict) and b.get("type") == "text"
             )
 
-        combined = f"{last_user_content} {system_content}".lower()
+        user_text_lower = last_user_content.lower()
 
         # Exclude CLI goal notice ("a session-scoped stop hook is now active")
-        if "a session-scoped stop hook is now active" in combined:
+        if "a session-scoped stop hook is now active" in user_text_lower:
             return False
 
         stop_hook_specific_patterns = (
@@ -101,7 +112,7 @@ class JSONRepairNormalizer:
             "session_summary",
             "return the stop hook",
         )
-        return any(pat in combined for pat in stop_hook_specific_patterns)
+        return any(pat in user_text_lower for pat in stop_hook_specific_patterns)
 
     @classmethod
     def fix_angle_brackets(cls, text: str) -> str:
