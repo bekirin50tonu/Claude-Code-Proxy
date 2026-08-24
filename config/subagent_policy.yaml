@@ -1,0 +1,11 @@
+subagents:
+  enabled: true
+  max_recursion_depth: 3
+  allowed_tools:
+    - "*"
+  blocked_tools:
+    - "rm -rf"
+    - "git push --force"
+  background_execution:
+    allowed: true
+    max_duration_seconds: 300
