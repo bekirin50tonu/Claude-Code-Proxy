@@ -155,14 +155,11 @@ def get_key_statuses() -> dict[str, str]:
         val_in_env = k in env_keys
         val_in_os = k in os.environ and bool(os.environ[k].strip())
 
-        if not val_in_env and val_in_os:
-            statuses[k] = "Env Locked"
-        elif val_in_env or val_in_os:
+        if val_in_env or val_in_os:
             statuses[k] = "Set"
         else:
             statuses[k] = "Not Set"
     return statuses
-
 
 
 def save_env_values(configs: dict[str, Any]) -> None:
@@ -194,6 +191,7 @@ def save_env_values(configs: dict[str, Any]) -> None:
                     cleaned = val_str.strip('"').strip("'")
                     new_lines.append(f'{key}="{cleaned}"\n')
                 updated_keys.add(key)
+                os.environ[key] = val_str
             else:
                 new_lines.append(line)
         else:
@@ -212,6 +210,7 @@ def save_env_values(configs: dict[str, Any]) -> None:
             else:
                 cleaned = val_str.strip('"').strip("'")
                 new_lines.append(f'{key}="{cleaned}"\n')
+            os.environ[key] = val_str
 
     with open(env_path, "w") as f:
         f.writelines(new_lines)
@@ -443,6 +442,31 @@ async def save_config(req: ConfigSaveRequest) -> JSONResponse:
             status_code=500,
             content={"status": "error", "message": f"Failed to save settings: {e}"},
         )
+
+
+class ModelReorderRequest(BaseModel):
+    alias: str
+    fallback_order: list[str]
+
+
+@router.post("/api/dev/models/reorder")
+async def reorder_model_fallbacks(req: ModelReorderRequest) -> JSONResponse:
+    """Reorder fallback chain for a client model alias without breaking logic."""
+    alias = req.alias.lower()
+    if alias not in ("claude_default", "claude_opus", "claude_sonnet", "claude_sonnet_1m", "claude_haiku"):
+        alias_map = {
+            "model_opus": "claude_opus",
+            "model_sonnet": "claude_sonnet",
+            "model_sonnet_1m": "claude_sonnet_1m",
+            "model_haiku": "claude_haiku",
+            "model": "claude_default",
+        }
+        alias = alias_map.get(alias, alias)
+
+    model_registry.save_entries({alias: {"fallback_order": req.fallback_order}})
+    model_registry.reload()
+    await ws_manager.broadcast_event("config_updated", {"message": f"Fallback order reordered for {alias}"})
+    return JSONResponse(content={"status": "success", "alias": alias, "fallback_order": req.fallback_order})
 
 
 @router.get("/api/settings/subagents")

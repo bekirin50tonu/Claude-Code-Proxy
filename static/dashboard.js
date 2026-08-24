@@ -251,12 +251,6 @@ async function saveConfigs(event) {
         const el = document.getElementById(key);
         if (!el) continue;
 
-        // Check lock status
-        if (lockStatuses[key] === "Env Locked" || lockStatuses[key] === "Locked") {
-            payload[key] = configSnapshot[key];
-            continue;
-        }
-
         if (el.type === 'checkbox') {
             payload[key] = el.checked;
         } else if (el.type === 'number') {
@@ -1659,10 +1653,54 @@ function renderTags(inputId) {
     tags.forEach((tag, idx) => {
         const chip = document.createElement('div');
         chip.className = 'tag-chip';
+        chip.style.display = 'inline-flex';
+        chip.style.alignItems = 'center';
+        chip.style.gap = '4px';
+
+        const spanNum = document.createElement('span');
+        spanNum.style.fontSize = '0.7rem';
+        spanNum.style.fontWeight = 'bold';
+        spanNum.style.color = '#38bdf8';
+        spanNum.innerText = `#${idx + 1}`;
+        chip.appendChild(spanNum);
         
         const spanText = document.createElement('span');
         spanText.innerText = tag;
         chip.appendChild(spanText);
+
+        // Move Up Button
+        if (idx > 0) {
+            const moveUpBtn = document.createElement('span');
+            moveUpBtn.className = 'tag-move';
+            moveUpBtn.title = 'Move Up in Priority';
+            moveUpBtn.style.cursor = 'pointer';
+            moveUpBtn.style.color = '#a7f3d0';
+            moveUpBtn.style.fontSize = '0.75rem';
+            moveUpBtn.style.padding = '0 2px';
+            moveUpBtn.innerHTML = '▲';
+            moveUpBtn.onclick = (e) => {
+                e.stopPropagation();
+                moveTag(inputId, idx, -1);
+            };
+            chip.appendChild(moveUpBtn);
+        }
+
+        // Move Down Button
+        if (idx < tags.length - 1) {
+            const moveDownBtn = document.createElement('span');
+            moveDownBtn.className = 'tag-move';
+            moveDownBtn.title = 'Move Down in Priority';
+            moveDownBtn.style.cursor = 'pointer';
+            moveDownBtn.style.color = '#fde68a';
+            moveDownBtn.style.fontSize = '0.75rem';
+            moveDownBtn.style.padding = '0 2px';
+            moveDownBtn.innerHTML = '▼';
+            moveDownBtn.onclick = (e) => {
+                e.stopPropagation();
+                moveTag(inputId, idx, 1);
+            };
+            chip.appendChild(moveDownBtn);
+        }
 
         const removeBtn = document.createElement('span');
         removeBtn.className = 'tag-remove';
@@ -1675,6 +1713,16 @@ function renderTags(inputId) {
 
         container.insertBefore(chip, inputEl);
     });
+}
+
+function moveTag(inputId, index, direction) {
+    if (!tagState[inputId]) return;
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= tagState[inputId].length) return;
+    const temp = tagState[inputId][index];
+    tagState[inputId][index] = tagState[inputId][newIndex];
+    tagState[inputId][newIndex] = temp;
+    renderTags(inputId);
 }
 
 function addTag(inputId, val) {

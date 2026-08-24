@@ -152,6 +152,25 @@ MCP_TOOLS_DEFINITIONS = [
         },
     },
     {
+        "name": "reorder_fallback_chain",
+        "description": "Reorder fallback priority chain for a client alias ('claude_default', 'claude_opus', 'claude_sonnet', 'claude_sonnet_1m', 'claude_haiku').",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "alias": {
+                    "type": "string",
+                    "description": "Target client model alias ('claude_default', 'claude_opus', 'claude_sonnet', 'claude_sonnet_1m', 'claude_haiku').",
+                },
+                "fallback_order": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Ordered array of model IDs representing the new fallback priority order.",
+                },
+            },
+            "required": ["alias", "fallback_order"],
+        },
+    },
+    {
         "name": "get_subagent_policy",
         "description": "Retrieve active YAML-driven subagent policy configuration and tool rules.",
         "inputSchema": {"type": "object", "properties": {}},
@@ -399,6 +418,14 @@ async def execute_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> dict[st
             routing_resp = await get_router_status()
             routing_data = json.loads(routing_resp.body.decode("utf-8"))
             return {"content": [{"type": "text", "text": json.dumps(routing_data, indent=2)}]}
+
+        elif tool_name == "reorder_fallback_chain":
+            alias = arguments.get("alias", "")
+            fb_order = arguments.get("fallback_order", [])
+            from api.dashboard import ModelReorderRequest, reorder_model_fallbacks
+            reorder_resp = await reorder_model_fallbacks(ModelReorderRequest(alias=alias, fallback_order=fb_order))
+            res_data = json.loads(reorder_resp.body.decode("utf-8"))
+            return {"content": [{"type": "text", "text": json.dumps(res_data, indent=2)}]}
 
         elif tool_name == "control_circuit_breaker":
             model_id = arguments.get("model_id", "")
