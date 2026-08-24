@@ -590,6 +590,16 @@
                         </div>
                         <div class="form-group">
                             <div class="label-row">
+                                <label for="TOKENROUTER_API_KEY">TokenRouter API Key</label>
+                                <span id="badge-TOKENROUTER_API_KEY" class="badge-status">...</span>
+                            </div>
+                            <div class="input-wrapper">
+                                <input type="password" id="TOKENROUTER_API_KEY" placeholder="tr-...">
+                                <button type="button" class="input-icon-btn" onclick="toggleMask('TOKENROUTER_API_KEY')">Show</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
                                 <label for="MISTRAL_API_KEY">Mistral / Codestral API Key</label>
                                 <span id="badge-MISTRAL_API_KEY" class="badge-status">...</span>
                             </div>
@@ -1494,6 +1504,10 @@ setx ANTHROPIC_AUTH_TOKEN "freecc"</code></pre>
                         <div class="form-group">
                             <label for="OPENROUTER_BASE_URL">OpenRouter Base URL Proxy</label>
                             <input type="text" id="OPENROUTER_BASE_URL" placeholder="https://openrouter.ai/api/v1">
+                        </div>
+                        <div class="form-group">
+                            <label for="TOKENROUTER_BASE_URL">TokenRouter Base URL Proxy</label>
+                            <input type="text" id="TOKENROUTER_BASE_URL" placeholder="https://api.tokenrouter.com/v1">
                         </div>
                         <div class="form-group">
                             <label for="MISTRAL_BASE_URL">Mistral / Codestral Base URL Proxy</label>

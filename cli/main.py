@@ -65,6 +65,18 @@ def doctor() -> None:
             "⚠️ [yellow]Optional (OpenRouter mapping will fail)[/yellow]",
         )
 
+    # 2b. Check TokenRouter Settings
+    if settings.TOKENROUTER_API_KEY:
+        table.add_row(
+            "TOKENROUTER_API_KEY", "Present (Configured)", "✅ [green]OK[/green]"
+        )
+    else:
+        table.add_row(
+            "TOKENROUTER_API_KEY",
+            "Empty",
+            "⚠️ [yellow]Optional (TokenRouter mapping will fail)[/yellow]",
+        )
+
     # 3. Model mappings
     table.add_row("MODEL_OPUS", settings.MODEL_OPUS, "✅ [green]Configured[/green]")
     table.add_row("MODEL_SONNET", settings.MODEL_SONNET, "✅ [green]Configured[/green]")
