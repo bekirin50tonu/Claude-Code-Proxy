@@ -213,12 +213,12 @@ class ModelConverter:
             for tc in tool_calls:
                 func = tc.get("function") or {}
                 raw_args = func.get("arguments") or "{}"
-                try:
-                    args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                except Exception:
-                    args = {}
-                if not isinstance(args, dict):
-                    args = {}
+                if isinstance(raw_args, dict):
+                    args = raw_args
+                else:
+                    from core.transformer.stream_engine import safe_parse_json
+                    parsed_args = safe_parse_json(str(raw_args))
+                    args = parsed_args if isinstance(parsed_args, dict) else {}
                 from atomic.guards.file_edit_guard import file_edit_guard
                 args = file_edit_guard.sanitize_tool_input(func.get("name", ""), args)
                 blocks.append(

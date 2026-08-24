@@ -170,3 +170,17 @@ async def test_stream_transformer_empty_stream_fallback_safety_net() -> None:
     assert "event: message_stop" in full_sse
     assert engine.text_or_tool_emitted is True
 
+
+def test_safe_parse_json_robustness() -> None:
+    """Test safe_parse_json repairing python literals, trailing commas, single quotes, and stringified JSON tool input."""
+    from core.transformer.stream_engine import safe_parse_json, _parse_tool_from_json
+
+    res1 = safe_parse_json("{'file_path': 'src/app.py', 'overwrite': True,}")
+    assert res1 == {"file_path": "src/app.py", "overwrite": True}
+
+    obj = {"name": "View", "arguments": '{"file_path": "src/index.ts"}'}
+    parsed = _parse_tool_from_json(obj)
+    assert parsed is not None
+    assert parsed["name"] == "View"
+    assert parsed["input"] == {"file_path": "src/index.ts"}
+

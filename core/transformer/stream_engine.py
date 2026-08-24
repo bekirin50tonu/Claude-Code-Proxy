@@ -106,8 +106,14 @@ def _parse_tool_from_json(
         or obj.get("input")
         or obj.get("args")
     )
-    if input_data is None:
-        input_data = {k: v for k, v in obj.items() if k != "name"}
+    if isinstance(input_data, str):
+        parsed = safe_parse_json(input_data)
+        if isinstance(parsed, dict):
+            input_data = parsed
+        else:
+            input_data = {}
+    elif input_data is None:
+        input_data = {k: v for k, v in obj.items() if k not in ("name", "id", "type")}
     if not isinstance(input_data, dict):
         input_data = {}
     return {
