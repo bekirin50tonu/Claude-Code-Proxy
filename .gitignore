@@ -76,3 +76,7 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Claude CLI local config
+.claude/
+.claude.json

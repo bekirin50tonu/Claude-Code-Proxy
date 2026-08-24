@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+import contextlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,10 +15,32 @@ from core.gateway import router as api_router
 from core.interceptor import JSONRepairMiddleware
 
 
+from api.metrics import metrics_router
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown lifecycles."""
+    import os
+    import signal
+    from config import model_registry, settings
+
     logger.info("Initializing Claude Code Proxy Server...")
+
+    # Register SIGHUP signal handler for zero-downtime hot-reload
+    def _handle_sighup(signum: int, frame: Any) -> None:
+        logger.info("Received SIGHUP signal. Reloading settings & model registry in-memory...")
+        settings.reload()
+        model_registry.reload()
+
+    if hasattr(signal, "SIGHUP"):
+        with contextlib.suppress(ValueError, OSError):
+            signal.signal(signal.SIGHUP, _handle_sighup)
+
+    # Automatically sync settings
+    port = int(os.getenv("PORT", os.getenv("GATEWAY_PORT", 8090)))
+    from api.settings_manager import claude_settings_manager
+    claude_settings_manager.sync_proxy_to_claude()
 
     # Start configured Telegram & Discord bots via BotFactory
     await start_all_bots()
@@ -49,6 +72,7 @@ if static_dir.exists():
 app.include_router(api_router)
 app.include_router(dashboard_router)
 app.include_router(mcp_router)
+app.include_router(metrics_router)
 
 
 @app.get("/")
@@ -56,7 +80,7 @@ async def root() -> dict[str, str]:
     return {
         "status": "online",
         "name": "Claude Code Proxy Server (Gateway)",
-        "docs": "https://github.com/Alishahryar1/free-claude-code",
+        "docs": "https://github.com/bekirin50tonu/Claude-Code-Proxy",
     }
 
 

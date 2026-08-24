@@ -1,12 +1,12 @@
 # Claude Code Proxy Server (Gateway)
 
-A high-performance, open-source, and modular proxy server designed to intercept Claude Code CLI/VSCode extension API requests (`/v1/messages`) and route them seamlessly to third-party LLM providers (NVIDIA NIM, OpenRouter, Gemini) or local endpoints (LM Studio, Ollama).
+A high-performance, open-source, and modular proxy server designed to intercept Claude Code CLI/VSCode extension API requests (`/v1/messages`) and route them seamlessly to third-party LLM providers (NVIDIA NIM, OpenRouter, Gemini, Groq, DeepSeek, Mistral, Cerebras, Fireworks, Kimi) or local endpoints (LM Studio, Ollama, Llama.cpp).
 
 ---
 
 ## 🏛️ Shared, Core & Atomic Yazılım Mimarisi
 
-Proje, S.O.L.I.D ilkelerine ve modüler **Shared, Core, Atomic** tasarım deseni mimarisine uygun olarak yeniden yapılandırılmıştır.
+Proje, S.O.L.I.D ilkelerine ve modüler **Shared, Core, Atomic** tasarım deseni mimarisine uygun olarak yapılandırılmıştır.
 
 ```
 claude-code-proxy/
@@ -16,108 +16,107 @@ claude-code-proxy/
 │   └── exceptions.py   # Tip güvenli özel istisna hiyerarşisi
 ├── atomic/             # Durumlu Micro-Bileşen Katmanı (Single Responsibility)
 │   ├── parsers/        # ThinkingParser (<think> etiketleri) & HeuristicToolParser
-│   └── guards/         # PreflightGuard, TokenBudgetGuard, SubagentGuard, StreamGuard
+│   └── guards/         # PreflightGuard, TokenBudgetGuard, SubagentGuard, StreamGuard, SubagentPolicyEngine, NIMThrottleGuard
 ├── core/               # Orkestrasyon & İş Mantığı Katmanı
-│   ├── gateway.py      # FastAPI route handler'ları (/v1/messages, /v1/models)
-│   ├── router/         # ModelSelector, CircuitBreaker & DynamicRateLimiter
+│   ├── gateway.py      # FastAPI route handler'ları (/v1/messages, /v1/models, SlidingWindowRateLimiter O(1))
+│   ├── router/         # ModelSelector, CircuitBreaker (Async/Lock & Atomic Persistence), DailyTracker
 │   └── transformer/    # StreamEngine (Akış orkestratörü)
 ├── cli/                # Terminal arayüzü ve oturum yönetimi (session.py, main.py)
-├── config/             # Ayarlar (.env) ve model kataloğu (models.yaml)
-├── api/                # Hermes Gate Dashboard, MCP Server (api/mcp.py) & 0-token local mock interceptor
-├── messaging/          # Telegram & Discord bot uzaktan yönetim entegrasyonu
+├── config/             # Ayarlar (.env, subagent_policy.yaml) ve model kataloğu (models.yaml)
+├── api/                # Dashboard, MCP Server (api/mcp.py), Prometheus Metrics (api/metrics.py) & Claude Settings Bridge (api/settings_manager.py)
+├── messaging/          # Telegram & Discord bot uzaktan yönetim entegrasyonu (Sanitized prompt injection)
 ├── mcp_server.py       # Hermes Agent Stdio MCP sunucusu
-└── tests/              # 99 adet pytest birim testi
+└── tests/              # 150+ adet pytest birim, eşzamanlılık ve kontrat testi
 ```
 
 ---
 
-## 🛠️ Temel Katmanlar ve Özellikler
+## 🚀 Son Güncellemeler ve Mimari İyileştirmeler
 
-### 1. Shared Katmanı (`shared/`)
-- **Durumsuz (Stateless) Yapı:** Hiçbir durum saklamaz. Yalnızca veri transfer nesnelerini (DTO) ve saf yardımcı fonksiyonları barındırır.
-- **Güçlü Hata Hiyerarşisi (`exceptions.py`):** `CircuitOpenError`, `RateLimitExceededError`, `ContextOverflowError`, `SubagentPolicyViolationError`.
+### 1. Dayanıklılık ve Eşzamanlılık (Resilience & Concurrency Fixes)
+- **Async & Thread-Safe CircuitBreaker (`core/router/circuit_breaker.py`):** `is_open()`, `trip_or_extend()`, `reset()`, `force_open()` async yapıya kavuşturulup `asyncio.Lock` ile yarıştırma koşullarına (race condition) karşı tam korumaya alındı.
+- **O(1) Sliding Window Rate Limiter (`core/gateway.py`):** Dizi filtreleme O(n) işleminden `collections.deque` yapısına geçilerek O(1) akış kontrolü sağlandı. `time.time()` yerine `time.monotonic()` kullanılarak sistem saati değişimlerinden etkilenmeyen tutarlı zamanlama sağlandı.
+- **Preflight Probe Yanlış Pozitif Düzeltmesi (`atomic/guards/preflight.py`):** 4xx istemci yanıtlarında Circuit Breaker tetiklenmesi önlendi (yalnızca loglama yapılır); sadece 5xx sunucu hataları Circuit Breaker sayacını artırır.
+- **Thread-Safe Key Rotation (`providers/openai.py`):** Sağlayıcı API key havuzu `asyncio.Lock` ile korunarak concurrent isteklerde mükerrer key kullanımı engellendi.
+- **Atomik Dosya Kaydı (`core/router/circuit_breaker.py`):** Breaker durumları `.tmp` dosyasına yazılıp `os.replace` ile atomik olarak kaydedilir, çökme anında YAML bozulması engellenir.
 
-### 2. Atomic Katmanı (`atomic/`)
-- **Tek Sorumluluklu Mikro Bileşenler:** Akış modunda veri işleyen durumlu (stateful) yapılar.
-- **Thinking & Heuristic Tool Parsers:** `<think>` akıl yürütme etiketlerini ve metin içi markdown/JSON komutlarını (`/graphify`, `pnpm dev`, `git status`) `tool_use` event'lerine dönüştürür.
-- **Güvenlik & Bütçe Korumaları:** `PreflightGuard` (1-token erişilebilirlik probe'u), `TokenBudgetGuard` (tiktoken ile context clipping), `SubagentGuard` (`run_in_background=False` zorlaması) ve `StreamGuard` (timeout & stall detector).
+### 2. Docker Secrets Entegrasyonu (`docker-compose.yml` & `config/config.py`)
+- Hassas API anahtarları (`NVIDIA_NIM_API_KEY`, `OPENROUTER_API_KEY`, `GATEWAY_AUTH_TOKEN`) öncelikli olarak `/run/secrets/` dizininden okunur; bulunamazsa `.env` değişkenlerine düşer.
 
-### 3. Core Katmanı (`core/`) & API / MCP Sunucusu
-- **İş Mantığı & Orkestrasyon:**
-  - **`StreamEngine`:** Upstream yanıt akışlarını alıp sırasıyla Atomic parser ve guard'lardan geçirir.
-  - **`ModelSelector` & Resilience:** Models kataloğuna göre primary ve fallback modelleri yönetir, Circuit Breaker ve Rate Limiter durumlarına göre otomatik model değiştirir.
-  - **`core.gateway`:** FastAPI `/v1/messages`, `/v1/models` ve `/v1/messages/count_tokens` uç noktaları.
-  - **Sağlayıcı Bazlı Canlı RPM & TPM Metrikleri:** 12 LLM sağlayıcısının tamamı için dakikalık istek (RPM) ve token (TPM) kullanımı 60s pencerede canlı takip edilir.
-  - **Hermes Agent İçin MCP (Model Context Protocol) Sunucusu (`api/mcp.py` & `mcp_server.py`):** HTTP/SSE ve Stdio JSON-RPC 2.0 üzerinden 9 yönetim aracı: `get_models`, `set_model_mapping`, `get_system_config`, `update_system_config`, `get_metrics`, `get_throttle_metrics`, `update_throttle_settings`, `get_model_routing`, ve `control_circuit_breaker`.
+### 3. Model-Spesifik Tokenizer Haritası (`atomic/guards/token_budget.py`)
+- `MODEL_TOKENIZER_MAP` ile `cl100k_base`, `o200k_base`, `p50k_base` gibi tokenizer kodlamaları model ailelerine göre dinamik eşleştirilir.
+
+### 4. Telegram Prompt Sanitizasyonu (`core/gateway.py`)
+- Telegram üzerinden kuyruğa alınan komutlar HTML escape, 2000 karakter sınırlandırması ve yasaklı enjeksiyon dizilim süzgecinden geçirilir.
+
+### 5. YAML-Driven Subagent Policy Engine (`atomic/guards/subagent_policy.py`)
+- Subagent araç çalıştırma kuralları `config/subagent_policy.yaml` dosyasından okunur; `SubagentPolicyEngine` izin/engel kararlarını denetler ve denetim günlüğü tutar.
+
+### 6. Claude Code Settings Bridge (`api/settings_manager.py`)
+- `~/.claude.json` (Kullanıcı), `.claude.json` (Proje) ve Yerel ayarları birleştirir. `sync_proxy_to_claude` aracı ile CLI yönlendirmesi otomatik yapılandırılır.
+
+### 7. Metrikler ve Canlı Sıcak Yükleme (Metrics & Hot-Reload)
+- **Prometheus Metrikleri (`/metrics`):** `proxy_requests_total`, `proxy_active_concurrency`, `proxy_error_total`, `proxy_circuit_state`, `proxy_rate_limit_headroom`.
+- **Sağlık Kontrolleri:** `/healthz` (Liveness) ve `/readyz` (Readiness).
+- **SIGHUP Sıcak Yükleme (`server.py`):** Sunucuyu yeniden başlatmadan `.env` ve `models.yaml` ayarlarını anlık günceller.
+
+---
+
+## 🛠️ MCP (Model Context Protocol) Araç Kataloğu (16 MCP Tool)
+
+Sunucu, Hem Hermes Agent hem de harici asistanlar için 16 adet idari MCP aracı sunar:
+1. `get_models`: Sağlayıcı model kataloğunu ve aktif istemci eşleşmelerini listeler.
+2. `set_model_mapping`: İstemci rumuzlarına target model ve fallback zinciri atar.
+3. `get_system_config`: Sistem ayarlarını ve sağlayıcı limitlerini okur.
+4. `update_system_config`: Sistem konfigürasyonunu günceller.
+5. `get_metrics`: Canlı trafik ve RPM/TPM metriklerini sunar.
+6. `get_throttle_metrics`: Gecikme ve throttle telemetry bilgilerini getirir.
+7. `update_throttle_settings`: NIM throttle parametrelerini dinamik günceller.
+8. `get_model_routing`: Yönlendirme matrisini getirir.
+9. `control_circuit_breaker`: Circuit breaker state'ini manuel sıfırlar veya keser.
+10. `get_subagent_policy`: Subagent kural politikasını getirir.
+11. `set_subagent_policy`: Subagent kural politikasını günceller.
+12. `get_subagent_decisions`: Subagent karar denetim geçmişini sunar.
+13. `manage_prompt_queue`: Telegram/CLI komut kuyruğunu yönetir (`peek`, `inject`, `replace`, `clear`).
+14. `get_claude_settings`: Birleştirilmiş Claude ayarlarını getirir.
+15. `set_claude_setting`: Claude ayarlarını günceller.
+16. `sync_proxy_to_claude`: Claude CLI ortamını yerel proxy sunucusuna eşlemler.
 
 ---
 
 ## 🛠️ Kurulum ve Çalıştırma
 
 ### 1. Bağımlılıkları Yükleyin (`uv`)
-
-[astral-uv](https://github.com/astral-sh/uv) kurulu olduğundan emin olun:
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync
 ```
 
 ### 2. Konfigürasyon (.env)
-
-Örnek `.env` dosyasını kopyalayın ve API anahtarlarınızı girin:
 ```bash
 cp .env.example .env
 ```
 
 ### 3. Sunucuyu Başlatın
-
-FastAPI gateway sunucusunu başlatmak için:
-```bash
-uv run python cli/main.py start --port 8090
-```
-veya doğrudan:
 ```bash
 uv run python server.py
 ```
 
-### 4. Stdio MCP Sunucusunu Başlatın (Hermes Agent Entegrasyonu)
-
+### 4. Stdio MCP Sunucusunu Başlatın
 ```bash
 uv run python mcp_server.py
 ```
 
 ---
 
-## 💻 Claude Code CLI Entegrasyonu
-
-Claude Code CLI isteklerini yerel proxy sunucusuna yönlendirmek için:
-
-```bash
-export ANTHROPIC_BASE_URL="http://localhost:8090"
-export ANTHROPIC_AUTH_TOKEN="dummy_token"
-
-# Teşhis ve Doğrulama
-claude doctor
-
-# Etkileşimli kodlama oturumunu başlatın
-claude
-```
-
----
-
 ## 📊 Dashboard ve Teşhis
 
-- **Hermes Gate Control Dashboard UI:** `http://localhost:8090/dashboard`
+- **Dashboard UI:** `http://localhost:8090/dashboard`
+- **Prometheus Metrikleri:** `http://localhost:8090/metrics`
+- **Sağlık Uç Noktaları:** `http://localhost:8090/healthz` ve `http://localhost:8090/readyz`
 - **MCP Sunucu Uç Noktaları:** `http://localhost:8090/mcp` & `http://localhost:8090/mcp/sse`
-- **Sistem Sağlık Teşhisi (Doctor):**
-  ```bash
-  uv run python cli/main.py doctor
-  ```
-- **Birim Testlerini Çalıştırın (99 Test):**
+- **Birim & Eşzamanlılık Testleri:**
   ```bash
   uv run pytest -v
   ```
-- **Kod Kalitesi Denetimi (Ruff):**
-  ```bash
-  uv run ruff check .
-  ```
+
