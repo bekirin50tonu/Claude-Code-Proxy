@@ -30,7 +30,7 @@ async def test_inline_query_run_autocomplete() -> None:
 async def test_inline_query_reset_circuit_autocomplete() -> None:
     """Test inline query autocomplete suggestions for /reset_circuit command."""
     cb = circuit_breaker_registry.get("nvidia_nim/z-ai/glm-5.2")
-    cb.force_open("Test timeout")
+    await cb.force_open("Test timeout")
 
     mock_update = MagicMock()
     mock_query = MagicMock()
@@ -46,4 +46,4 @@ async def test_inline_query_reset_circuit_autocomplete() -> None:
     assert any("nvidia_nim/z-ai/glm-5.2" in r.title for r in results)
 
     # Clean up test breaker
-    cb.reset()
+    await cb.reset()

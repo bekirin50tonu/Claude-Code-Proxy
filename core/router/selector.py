@@ -42,10 +42,10 @@ class ModelSelector:
             self._preflight_fn = preflight_model_probe
         return self._preflight_fn
 
-    def _is_available(self, model_id: str) -> bool:
-        """Fast sync check — Circuit Breaker and Rate Limiter only."""
+    async def _is_available(self, model_id: str) -> bool:
+        """Fast async check — Circuit Breaker and Rate Limiter only."""
         cb = _get_cb_registry().get(model_id)
-        if cb.is_open():
+        if await cb.is_open():
             return False
         return rate_limit_parser.has_headroom(model_id)
 
@@ -63,7 +63,7 @@ class ModelSelector:
             if not model_id:
                 continue
 
-            if not self._is_available(model_id):
+            if not await self._is_available(model_id):
                 logger.info("Selector: %s unavailable (CB/RL), skipping", model_id)
                 tried.append(model_id)
                 continue
@@ -101,7 +101,7 @@ class ModelSelector:
             reason_lower = (reason or "").lower()
             if any(k in reason_lower for k in ["quota_exceeded", "daily_quota", "rpd limit", "daily limit", "quota exceeded"]):
                 daily_request_tracker.mark_exceeded(provider)
-                cb.force_open(f"Daily RPD quota exceeded ({reason})")
+                await cb.force_open(f"Daily RPD quota exceeded ({reason})")
             else:
                 await cb.record_failure(reason=reason or "Upstream request failure")
             logger.warning("Selector: failure recorded for '%s' (CB failures: %d, reason: %s)", model_id, cb._failure_count, reason)

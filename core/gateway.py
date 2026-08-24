@@ -17,7 +17,23 @@ from config import settings, stats
 from core.router.selector import AllModelsUnavailableError, model_selector
 from core.transformer.stream_engine import StreamEngine, translate_non_stream_response
 from providers.openai import OpenAICompatibleProvider
+import html
 from shared.exceptions import NimQueueTimeoutError
+
+
+def _sanitize_telegram_prompt(prompt: str, max_length: int = 2000) -> str:
+    """Sanitize remote Telegram prompts via HTML escape, length capping, and control token filtering."""
+    if not prompt or not isinstance(prompt, str):
+        return ""
+    forbidden = ["</think>", "<|im_end|>", "<|endoftext|>", "[INST]", "[/INST]"]
+    cleaned = prompt
+    for token in forbidden:
+        cleaned = cleaned.replace(token, "")
+
+    escaped = html.escape(cleaned.strip())
+    if len(escaped) > max_length:
+        escaped = escaped[:max_length] + " [truncated]"
+    return escaped
 
 model_router = model_selector
 router = APIRouter()
@@ -85,17 +101,21 @@ async def log_after_stream(
         )
 
 
+from collections import deque
+
+
 class SlidingWindowRateLimiter:
-    def __init__(self, limit: int, window: int):
+    def __init__(self, limit: int, window: float | int):
         self.limit = limit
-        self.window = window
-        self.requests: list[float] = []
+        self.window = float(window)
+        self.requests: deque[float] = deque()
         self.lock = asyncio.Lock()
 
     async def acquire(self) -> bool:
         async with self.lock:
-            now = time.time()
-            self.requests = [r for r in self.requests if now - r < self.window]
+            now = time.monotonic()
+            while self.requests and (now - self.requests[0]) >= self.window:
+                self.requests.popleft()
             if len(self.requests) < self.limit:
                 self.requests.append(now)
                 return True
@@ -258,6 +278,8 @@ async def messages_endpoint(request: Request) -> Any:
     system = body.get("system")
 
     # Resolve Session ID and check for pending Telegram prompts in queue
+
+
     session_id = request.headers.get("x-session-id") or request.headers.get("x-conversation-id") or "default_session"
     from core.interceptor.prompt_queue import prompt_queue_manager
 
@@ -266,17 +288,20 @@ async def messages_endpoint(request: Request) -> Any:
         pending_prompts = prompt_queue_manager.pop_all_prompts("default_session")
 
     if pending_prompts:
-        injection_text = "\n\n".join([f"📌 [Remote User Instruction via Telegram]: {p}" for p in pending_prompts])
-        if messages and isinstance(messages, list):
-            if messages[-1].get("role") == "user":
-                last_content = messages[-1].get("content")
-                if isinstance(last_content, str):
-                    messages[-1]["content"] = last_content + f"\n\n{injection_text}"
-                elif isinstance(last_content, list):
-                    messages[-1]["content"].append({"type": "text", "text": injection_text})
-            else:
-                messages.append({"role": "user", "content": injection_text})
-        logger.info(f"Injected {len(pending_prompts)} Telegram prompt(s) into session '{session_id}' request payload.")
+        sanitized_prompts = [_sanitize_telegram_prompt(p) for p in pending_prompts if p]
+        sanitized_prompts = [p for p in sanitized_prompts if p]
+        if sanitized_prompts:
+            injection_text = "\n\n".join([f"📌 [Remote User Instruction via Telegram]: {p}" for p in sanitized_prompts])
+            if messages and isinstance(messages, list):
+                if messages[-1].get("role") == "user":
+                    last_content = messages[-1].get("content")
+                    if isinstance(last_content, str):
+                        messages[-1]["content"] = last_content + f"\n\n{injection_text}"
+                    elif isinstance(last_content, list):
+                        messages[-1]["content"].append({"type": "text", "text": injection_text})
+                else:
+                    messages.append({"role": "user", "content": injection_text})
+            logger.info(f"Injected {len(sanitized_prompts)} sanitized Telegram prompt(s) into session '{session_id}' request payload.")
 
     model_thinking_mode = settings.get_thinking_mode(client_model)
     if model_thinking_mode == "open":
@@ -345,7 +370,7 @@ async def messages_endpoint(request: Request) -> Any:
     is_stop_hook = JSONRepairNormalizer.is_stop_hook_target(body)
 
     for mapped_model in candidates:
-        if not model_selector._is_available(mapped_model):
+        if not await model_selector._is_available(mapped_model):
             tried_models.append(mapped_model)
             attempt_history.append({
                 "model": mapped_model,
@@ -504,7 +529,7 @@ async def messages_endpoint(request: Request) -> Any:
                     failure_reason = f"HTTP {status_code} (Model Not Found / EOL)"
                     from core.router.circuit_breaker import circuit_breaker_registry
                     cb = circuit_breaker_registry.get(mapped_model)
-                    cb.force_open(reason=failure_reason)
+                    await cb.force_open(reason=failure_reason)
 
             attempt_history.append({
                 "model": mapped_model,

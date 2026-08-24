@@ -25,12 +25,13 @@ def test_daily_request_tracker_increment_and_reset() -> None:
     assert daily_request_tracker.get_count("groq") == 0
 
 
-def test_circuit_breaker_trips_on_rpd_exceeded() -> None:
+@pytest.mark.asyncio
+async def test_circuit_breaker_trips_on_rpd_exceeded() -> None:
     """Test that CircuitBreaker automatically trips OPEN when provider RPD limit is exceeded."""
     model_id = "groq/llama-3.3-70b"
     cb = circuit_breaker_registry.get(model_id)
-    cb.reset()
-    assert not cb.is_open()
+    await cb.reset()
+    assert not await cb.is_open()
 
     # Artificially set Groq RPD limit to 2
     settings.PROVIDER_GROQ_RPD = 2
@@ -39,14 +40,14 @@ def test_circuit_breaker_trips_on_rpd_exceeded() -> None:
     daily_request_tracker.record_request("groq")
 
     # Now Groq has 2 requests = RPD limit 2 -> cb.is_open() should return True
-    assert cb.is_open()
+    assert await cb.is_open()
     status = cb.status_dict()
     assert status["state"] == "open"
     assert "Daily RPD limit reached" in str(status["last_failure_reason"])
 
     # Resetting CB should also clear daily RPD count
-    cb.reset()
-    assert not cb.is_open()
+    await cb.reset()
+    assert not await cb.is_open()
 
 
 @pytest.mark.asyncio
@@ -54,7 +55,7 @@ async def test_selector_record_outcome_quota_429() -> None:
     """Test that upstream 429 Daily Quota error triggers an RPD circuit trip."""
     model_id = "deepseek/deepseek-chat"
     cb = circuit_breaker_registry.get(model_id)
-    cb.reset()
+    await cb.reset()
 
     await model_selector.record_outcome(
         model_id,
@@ -62,11 +63,11 @@ async def test_selector_record_outcome_quota_429() -> None:
         reason="HTTP 429 Daily Quota Exceeded (RPD limit)",
     )
 
-    assert cb.is_open()
+    assert await cb.is_open()
     assert "Daily RPD quota exceeded" in cb.status_dict()["last_failure_reason"]
 
     # Clean up
-    cb.reset()
+    await cb.reset()
 
 
 def test_router_status_endpoint_returns_daily_rpd() -> None:

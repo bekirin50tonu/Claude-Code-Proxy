@@ -119,8 +119,8 @@ async def test_circuit_breaker_reset_state() -> None:
     cb = registry.get("nvidia_nim/z-ai/glm-5.2")
 
     with patch("core.router.circuit_breaker.circuit_breaker_registry", registry):
-        cb.force_open("Test force open")
+        await cb.force_open("Test force open")
         assert cb.state == CircuitState.OPEN
 
-        cb.reset()
+        await cb.reset()
         assert cb.state == CircuitState.CLOSED

@@ -11,24 +11,25 @@ from config import settings
 from providers.base import BaseProvider
 
 _key_counters: dict[str, int] = {}
+_key_lock = asyncio.Lock()
 
 
-
-def _select_key(raw_key: str, provider_part: str) -> str:
-    """Select single key or rotate through comma-separated keys round-robin."""
+async def _select_key(raw_key: str, provider_part: str) -> str:
+    """Select single key or rotate through comma-separated keys round-robin with asyncio.Lock."""
     if not raw_key:
         return ""
     if "," in raw_key:
         keys = [k.strip() for k in raw_key.split(",") if k.strip()]
         if keys:
-            idx = _key_counters.get(provider_part, 0)
-            _key_counters[provider_part] = (idx + 1) % len(keys)
-            return keys[idx]
+            async with _key_lock:
+                idx = _key_counters.get(provider_part, 0)
+                _key_counters[provider_part] = (idx + 1) % len(keys)
+                return keys[idx]
     return raw_key.strip()
 
 
 class OpenAICompatibleProvider(BaseProvider):
-    def _resolve_endpoint(
+    async def _resolve_endpoint(
         self, mapped_model: str
     ) -> tuple[str, str, str, dict[str, str]]:
         """Resolve base URL, actual model name, API key, and extra headers."""
@@ -41,35 +42,35 @@ class OpenAICompatibleProvider(BaseProvider):
 
         if provider_part == "nvidia_nim":
             base_url = settings.NVIDIA_NIM_BASE_URL
-            api_key = _select_key(settings.NVIDIA_NIM_API_KEY, "nvidia_nim")
+            api_key = await _select_key(settings.NVIDIA_NIM_API_KEY, "nvidia_nim")
         elif provider_part == "open_router":
             base_url = settings.OPENROUTER_BASE_URL
-            api_key = _select_key(settings.OPENROUTER_API_KEY, "open_router")
+            api_key = await _select_key(settings.OPENROUTER_API_KEY, "open_router")
             extra_headers["HTTP-Referer"] = (
-                "https://github.com/Alishahryar1/free-claude-code"
+                "https://github.com/bekirin50tonu/Claude-Code-Proxy"
             )
             extra_headers["X-Title"] = "Claude Code Proxy"
         elif provider_part == "groq":
             base_url = settings.GROQ_BASE_URL
-            api_key = _select_key(settings.GROQ_API_KEY, "groq")
+            api_key = await _select_key(settings.GROQ_API_KEY, "groq")
         elif provider_part == "deepseek":
             base_url = settings.DEEPSEEK_BASE_URL
-            api_key = _select_key(settings.DEEPSEEK_API_KEY, "deepseek")
+            api_key = await _select_key(settings.DEEPSEEK_API_KEY, "deepseek")
         elif provider_part == "mistral":
             base_url = settings.MISTRAL_BASE_URL
-            api_key = _select_key(settings.MISTRAL_API_KEY, "mistral")
+            api_key = await _select_key(settings.MISTRAL_API_KEY, "mistral")
         elif provider_part == "cerebras":
             base_url = settings.CEREBRAS_BASE_URL
-            api_key = _select_key(settings.CEREBRAS_API_KEY, "cerebras")
+            api_key = await _select_key(settings.CEREBRAS_API_KEY, "cerebras")
         elif provider_part == "fireworks":
             base_url = settings.FIREWORKS_BASE_URL
-            api_key = _select_key(settings.FIREWORKS_API_KEY, "fireworks")
+            api_key = await _select_key(settings.FIREWORKS_API_KEY, "fireworks")
         elif provider_part == "kimi":
             base_url = "https://api.moonshot.cn/v1"
-            api_key = _select_key(settings.KIMI_API_KEY, "kimi")
+            api_key = await _select_key(settings.KIMI_API_KEY, "kimi")
         elif provider_part == "gemini":
             base_url = settings.GEMINI_BASE_URL.rstrip("/") + "/openai"
-            api_key = _select_key(settings.GEMINI_API_KEY, "gemini")
+            api_key = await _select_key(settings.GEMINI_API_KEY, "gemini")
         elif provider_part == "lmstudio":
             base_url = settings.LM_STUDIO_BASE_URL
             api_key = ""
@@ -98,14 +99,8 @@ class OpenAICompatibleProvider(BaseProvider):
         max_tokens: int = 4096,
         **kwargs: Any,
     ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
-        """Send request to OpenAI-compatible chat completions endpoint.
-
-        Non-stream: returns (response_dict, response_headers_dict) tuple.
-        Stream:     returns AsyncGenerator that yields OpenAI chunk dicts;
-                    the response headers are stored on the generator object
-                    as `response_headers` after the first chunk is yielded.
-        """
-        base_url, upstream_model, api_key, extra_headers = self._resolve_endpoint(model)
+        """Send request to OpenAI-compatible chat completions endpoint."""
+        base_url, upstream_model, api_key, extra_headers = await self._resolve_endpoint(model)
 
         openai_messages = self.translate_messages(messages, system)
         openai_tools = self.translate_tools(tools)

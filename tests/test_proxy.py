@@ -587,15 +587,15 @@ async def test_circuit_breaker_state_machine() -> None:
     cb = CircuitBreaker("test-model", failure_threshold=3, recovery_timeout=999)
 
     # Should start CLOSED
-    assert not cb.is_open()
+    assert not await cb.is_open()
 
     # Record failures up to threshold
     await cb.record_failure()
     await cb.record_failure()
-    assert not cb.is_open()  # Not yet
+    assert not await cb.is_open()  # Not yet
 
     await cb.record_failure()
-    assert cb.is_open()  # Now OPEN
+    assert await cb.is_open()  # Now OPEN
 
 
 @pytest.mark.asyncio
@@ -608,19 +608,19 @@ async def test_circuit_breaker_half_open_recovery() -> None:
     cb = CircuitBreaker("test-model", failure_threshold=1, recovery_timeout=0.05)
 
     await cb.record_failure()
-    assert cb.is_open()
+    assert await cb.is_open()
 
     # Wait for recovery_timeout to elapse
     time.sleep(0.1)
 
     # Now is_open() should trigger HALF_OPEN transition → returns False (allows probe)
-    assert not cb.is_open()
+    assert not await cb.is_open()
     assert cb.state == CircuitState.HALF_OPEN
 
     # Success → back to CLOSED
     await cb.record_success()
     assert cb.state == CircuitState.CLOSED
-    assert not cb.is_open()
+    assert not await cb.is_open()
 
 
 @pytest.mark.asyncio
@@ -633,7 +633,7 @@ async def test_circuit_breaker_half_open_failure_reopens() -> None:
     cb = CircuitBreaker("test-model", failure_threshold=1, recovery_timeout=0.05)
     await cb.record_failure()
     time.sleep(0.1)
-    cb.is_open()  # Trigger HALF_OPEN
+    await cb.is_open()  # Trigger HALF_OPEN
     assert cb.state == CircuitState.HALF_OPEN
 
     await cb.record_failure()  # HALF_OPEN + failure → OPEN
@@ -708,7 +708,7 @@ async def test_model_router_fallback() -> None:
     cb = fresh_registry.get(primary)
     for _ in range(5):
         await cb.record_failure()
-    assert cb.is_open()
+    assert await cb.is_open()
 
     router = ModelRouter()
 
@@ -724,7 +724,7 @@ async def test_model_router_fallback() -> None:
     ):
         # Since primary CB is open, router should pick first fallback
         # We test the _is_available check
-        assert not router._is_available(primary)
+        assert not await router._is_available(primary)
 
 
 @pytest.mark.asyncio
@@ -1020,15 +1020,16 @@ def test_in_flight_429_auto_retry_fallback() -> None:
         assert resp.json()["id"] == "chatcmpl-fallback"
 
 
-def test_multi_key_rotation() -> None:
+@pytest.mark.asyncio
+async def test_multi_key_rotation() -> None:
     from providers.openai import _select_key
 
     raw_keys = "key1, key2, key3"
     # Round robin rotation
-    k1 = _select_key(raw_keys, "test_prov")
-    k2 = _select_key(raw_keys, "test_prov")
-    k3 = _select_key(raw_keys, "test_prov")
-    k4 = _select_key(raw_keys, "test_prov")
+    k1 = await _select_key(raw_keys, "test_prov")
+    k2 = await _select_key(raw_keys, "test_prov")
+    k3 = await _select_key(raw_keys, "test_prov")
+    k4 = await _select_key(raw_keys, "test_prov")
 
     assert k1 == "key1"
     assert k2 == "key2"
@@ -1037,7 +1038,7 @@ def test_multi_key_rotation() -> None:
 
     # Single key compatibility
     single_key = "  nvapi-single-key  "
-    assert _select_key(single_key, "single_prov") == "nvapi-single-key"
+    assert await _select_key(single_key, "single_prov") == "nvapi-single-key"
 
 
 def test_model_registry_custom_primary_and_empty_fallbacks() -> None:

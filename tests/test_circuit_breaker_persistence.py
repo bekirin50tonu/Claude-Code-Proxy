@@ -3,6 +3,8 @@
 import os
 import time
 
+import pytest
+
 from core.router.circuit_breaker import (
     STORAGE_FILE,
     CircuitBreakerRegistry,
@@ -10,7 +12,8 @@ from core.router.circuit_breaker import (
 )
 
 
-def test_circuit_breaker_started_at_and_expired_at_persistence() -> None:
+@pytest.mark.asyncio
+async def test_circuit_breaker_started_at_and_expired_at_persistence() -> None:
     """Test that started_at and expired_at are persisted to file and restored on restart."""
     # Ensure clean file state
     if os.path.exists(STORAGE_FILE):
@@ -21,7 +24,7 @@ def test_circuit_breaker_started_at_and_expired_at_persistence() -> None:
 
     now = time.time()
     # Trip breaker for 300 seconds (5 min)
-    cb1.trip_or_extend("Test persistent failure")
+    await cb1.trip_or_extend("Test persistent failure")
     registry1.save_to_file(force=True)
 
     assert cb1.state == CircuitState.OPEN
@@ -42,9 +45,9 @@ def test_circuit_breaker_started_at_and_expired_at_persistence() -> None:
     assert cb2.state == CircuitState.OPEN
     assert cb2.started_at == cb1.started_at
     assert cb2.expired_at == cb1.expired_at
-    assert cb2.is_open() is True
+    assert await cb2.is_open() is True
 
     # Cleanup
-    cb1.reset()
+    await cb1.reset()
     if os.path.exists(STORAGE_FILE):
         os.remove(STORAGE_FILE)

@@ -31,7 +31,7 @@ def _resolve_url_and_headers(model_id: str) -> tuple[str, dict[str, str]] | None
         url = f"{settings.OPENROUTER_BASE_URL.rstrip('/')}/chat/completions"
         if settings.OPENROUTER_API_KEY:
             extra["Authorization"] = f"Bearer {settings.OPENROUTER_API_KEY}"
-        extra["HTTP-Referer"] = "https://github.com/Alishahryar1/free-claude-code"
+        extra["HTTP-Referer"] = "https://github.com/bekirin50tonu/Claude-Code-Proxy"
         extra["X-Title"] = "Claude Code Proxy"
     elif provider_part == "groq":
         url = f"{settings.GROQ_BASE_URL.rstrip('/')}/chat/completions"
@@ -101,9 +101,13 @@ async def preflight_model_probe(model_id: str) -> bool:
         async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
             response = await client.post(url, headers=headers, json=payload)
 
-        if response.status_code < 500:
+        if response.status_code < 400:
             await cb.record_success()
             logger.debug("Preflight OK (Server Reachable): '%s' → %d", model_id, response.status_code)
+            return True
+
+        if response.status_code < 500:
+            logger.warning("Preflight Client Response (Server Reachable): '%s' → %d. Logged without CB failure.", model_id, response.status_code)
             return True
 
         logger.warning("Preflight FAIL (Server 5xx Error): '%s' → %d", model_id, response.status_code)
@@ -111,8 +115,7 @@ async def preflight_model_probe(model_id: str) -> bool:
         return False
 
     except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:
-        logger.warning("Preflight FAIL: '%s' → %s: %s", model_id, type(exc).__name__, exc)
-        await cb.record_failure()
+        logger.warning("Preflight TIMEOUT/NETWORK (%s): '%s' → %s (Network issue, CB unchanged)", type(exc).__name__, model_id, exc)
         return False
     except Exception as exc:
         logger.error("Preflight ERROR: '%s' → unexpected: %s", model_id, exc)

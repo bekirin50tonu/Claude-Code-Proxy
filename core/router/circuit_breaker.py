@@ -69,8 +69,12 @@ class CircuitBreaker:
     def _get_registry(self) -> Any:
         return self._registry or circuit_breaker_registry
 
-    def reset(self, save: bool = True) -> None:
+    async def reset(self, save: bool = True) -> None:
         """Reset circuit breaker back to CLOSED state and clear failure counter and timeout."""
+        async with self._lock:
+            self._reset_internal(save=save)
+
+    def _reset_internal(self, save: bool = True) -> None:
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self.started_at = None
@@ -86,8 +90,12 @@ class CircuitBreaker:
         if save:
             self._get_registry().save_to_file()
 
-    def trip_or_extend(self, reason: str = "Manually forced OPEN via Dashboard", save: bool = True) -> float:
+    async def trip_or_extend(self, reason: str = "Manually forced OPEN via Dashboard", save: bool = True) -> float:
         """Trip circuit breaker into OPEN state or extend timeout step-wise."""
+        async with self._lock:
+            return self._trip_or_extend_internal(reason=reason, save=save)
+
+    def _trip_or_extend_internal(self, reason: str = "Manually forced OPEN via Dashboard", save: bool = True) -> float:
         now_wall = time.time()
         if self._state in (CircuitState.OPEN, CircuitState.HALF_OPEN):
             self._manual_timeout_index = min(
@@ -114,49 +122,50 @@ class CircuitBreaker:
 
         return new_timeout
 
-    def force_open(self, reason: str = "Upstream error / EOL / Not Found") -> None:
+    async def force_open(self, reason: str = "Upstream error / EOL / Not Found") -> None:
         """Force circuit breaker into OPEN state with given failure reason."""
-        self.trip_or_extend(reason=reason)
+        await self.trip_or_extend(reason=reason)
 
-    def is_open(self) -> bool:
+    async def is_open(self) -> bool:
         """Return True when requests should be blocked (OPEN state)."""
-        provider = self.model_id.split("/", 1)[0] if "/" in self.model_id else "nvidia_nim"
-        from core.router.daily_tracker import daily_request_tracker
-        exceeded, cur, limit = daily_request_tracker.is_exceeded(provider)
+        async with self._lock:
+            provider = self.model_id.split("/", 1)[0] if "/" in self.model_id else "nvidia_nim"
+            from core.router.daily_tracker import daily_request_tracker
+            exceeded, cur, limit = daily_request_tracker.is_exceeded(provider)
 
-        if exceeded:
-            if self._state != CircuitState.OPEN or "RPD" not in self._last_failure_reason:
-                self._state = CircuitState.OPEN
+            if exceeded:
+                if self._state != CircuitState.OPEN or "RPD" not in self._last_failure_reason:
+                    self._state = CircuitState.OPEN
+                    now_wall = time.time()
+                    self.started_at = now_wall
+                    self.expired_at = None
+                    self._opened_at_wall = time.strftime("%H:%M:%S", time.localtime(now_wall))
+                    self._reopens_at_wall = "Midnight (RPD Reset)"
+                    self._last_failure_reason = f"Daily RPD limit reached ({cur}/{limit})"
+                    reg = self._get_registry()
+                    reg.save_to_file()
+                    reg.notify_trip(self.model_id, self._last_failure_reason)
+                return True
+
+            if self._state == CircuitState.OPEN:
                 now_wall = time.time()
-                self.started_at = now_wall
-                self.expired_at = None
-                self._opened_at_wall = time.strftime("%H:%M:%S", time.localtime(now_wall))
-                self._reopens_at_wall = "Midnight (RPD Reset)"
-                self._last_failure_reason = f"Daily RPD limit reached ({cur}/{limit})"
-                reg = self._get_registry()
-                reg.save_to_file()
-                reg.notify_trip(self.model_id, self._last_failure_reason)
-            return True
-
-        if self._state == CircuitState.OPEN:
-            now_wall = time.time()
-            if self.expired_at and now_wall >= self.expired_at:
-                self._state = CircuitState.HALF_OPEN
-                self._get_registry().save_to_file()
-                return False
-            return True
-        return False
+                if self.expired_at and now_wall >= self.expired_at:
+                    self._state = CircuitState.HALF_OPEN
+                    self._get_registry().save_to_file()
+                    return False
+                return True
+            return False
 
     async def record_success(self) -> None:
         async with self._lock:
-            self.reset()
+            self._reset_internal()
 
     async def record_failure(self, reason: str = "Upstream execution failure") -> None:
         async with self._lock:
             self._failure_count += 1
             self._last_failure_reason = reason
             if self._state == CircuitState.HALF_OPEN or self._failure_count >= self.failure_threshold:
-                self.trip_or_extend(reason=reason)
+                self._trip_or_extend_internal(reason=reason)
                 self._failure_count = 0
 
     def status_dict(self) -> dict[str, object]:
@@ -215,7 +224,7 @@ class CircuitBreakerRegistry:
         return {mid: cb.status_dict() for mid, cb in self._breakers.items()}
 
     def save_to_file(self, force: bool = False) -> None:
-        """Persist circuit breaker states to storage file."""
+        """Persist circuit breaker states to storage file using atomic file replacement."""
         if "PYTEST_CURRENT_TEST" in os.environ and not force:
             return
         try:
@@ -233,8 +242,10 @@ class CircuitBreakerRegistry:
                     "opened_at_wall": cb._opened_at_wall,
                     "reopens_at_wall": cb._reopens_at_wall,
                 }
-            with open(STORAGE_FILE, "w", encoding="utf-8") as f:
+            tmp_file = f"{STORAGE_FILE}.tmp.{os.getpid()}"
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 yaml.safe_dump(data, f, default_flow_style=False)
+            os.replace(tmp_file, STORAGE_FILE)
         except Exception as e:
             logger.warning(f"Failed to persist circuit breaker states: {e}")
 
