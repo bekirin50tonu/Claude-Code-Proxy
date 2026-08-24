@@ -11,11 +11,38 @@ from config import ModelMetadata, model_registry
 SAFETY_BUFFER = 256
 _O200K_FAMILIES = ("llama", "mistral", "qwen", "glm", "gemma", "deepseek", "phi")
 
+MODEL_TOKENIZER_MAP: dict[str, str] = {
+    "nvidia/nemotron-3-ultra-550b-a55b": "cl100k_base",
+    "meta/llama-3.1-70b-instruct": "o200k_base",
+    "meta-llama/llama-3.3-70b-instruct": "o200k_base",
+    "z-ai/glm-5.2": "o200k_base",
+    "gpt-4o": "o200k_base",
+    "gpt-4": "cl100k_base",
+    "gpt-3.5-turbo": "cl100k_base",
+    "text-davinci-003": "p50k_base",
+}
+
 
 @functools.lru_cache(maxsize=16)
 def _get_encoding(model_id: str) -> tiktoken.Encoding:
     """Select the best tiktoken encoding for the upstream model (cached in LRU)."""
     model_lower = model_id.lower()
+    
+    # 1. Exact or substring match in MODEL_TOKENIZER_MAP
+    if model_id in MODEL_TOKENIZER_MAP:
+        try:
+            return tiktoken.get_encoding(MODEL_TOKENIZER_MAP[model_id])
+        except Exception:
+            pass
+
+    for key, enc_name in MODEL_TOKENIZER_MAP.items():
+        if key in model_lower:
+            try:
+                return tiktoken.get_encoding(enc_name)
+            except Exception:
+                pass
+
+    # 2. Fallback to model family heuristics
     if any(fam in model_lower for fam in _O200K_FAMILIES):
         try:
             return tiktoken.get_encoding("o200k_base")
