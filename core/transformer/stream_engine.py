@@ -459,10 +459,10 @@ class StreamEngine:
                 finish_reason = "tool_calls"
                 continue
 
-            # 3. Content deltas (Text stream content through atomic parsers)
+            # 3. Content deltas (Linear Sequential Pipeline: Thinking -> HeuristicTool -> Text)
             content = delta.get("content") or ""
             if content:
-                think_events = await self.thinking_parser.process_chunk(content)
+                think_events, clean_text = await self.thinking_parser.process_chunk_pipeline(content)
                 if think_events:
                     for ev in think_events:
                         if hasattr(ev, "delta"):
@@ -474,26 +474,38 @@ class StreamEngine:
                                     import asyncio
 
                                     from bot.live_bridge import live_bridge_manager
-                                    asyncio.create_task(live_bridge_manager.dispatch_thinking_chunk(self.session.session_id, think_val))
-                            elif dtype == "text_delta":
-                                text_val = getattr(ev.delta, "text", "")
-                                self.accumulated_text.append(text_val)
-                                if text_val:
-                                    self.text_or_tool_emitted = True
+
+                                    asyncio.create_task(
+                                        live_bridge_manager.dispatch_thinking_chunk(self.session.session_id, think_val)
+                                    )
                         yield ev.to_sse()
-                else:
-                    tool_events = await self.heuristic_tool_parser.process_chunk(content)
+
+                if clean_text:
+                    tool_events, remaining_text = await self.heuristic_tool_parser.process_chunk_pipeline(clean_text)
                     if tool_events:
                         for ev in tool_events:
-                            if hasattr(ev, "content_block") and getattr(ev.content_block, "type", None) == "tool_use" or (
-                                hasattr(ev, "delta")
-                                and getattr(ev.delta, "type", None) == "text_delta"
-                                and getattr(ev.delta, "text", "")
-                            ):
+                            if hasattr(ev, "content_block") and getattr(ev.content_block, "type", None) == "tool_use":
                                 self.text_or_tool_emitted = True
-
+                                cb = getattr(ev, "content_block")
+                                self._current_heuristic_tc = {
+                                    "type": "tool_use",
+                                    "id": getattr(cb, "id", f"toolu_{uuid.uuid4().hex[:10]}"),
+                                    "name": getattr(cb, "name", ""),
+                                    "input": {},
+                                }
+                            elif hasattr(ev, "delta") and getattr(ev.delta, "type", None) == "input_json_delta":
+                                partial_json = getattr(ev.delta, "partial_json", "")
+                                if getattr(self, "_current_heuristic_tc", None):
+                                    try:
+                                        self._current_heuristic_tc["input"] = json.loads(partial_json)
+                                    except Exception:
+                                        self._current_heuristic_tc["input"] = {}
+                                    if self._current_heuristic_tc["name"]:
+                                        self.accumulated_tool_calls.append(self._current_heuristic_tc)
+                                    self._current_heuristic_tc = None
                             yield ev.to_sse()
-                    else:
+
+                    if remaining_text:
                         if self.current_block_type != "text":
                             if self.current_block_type is not None:
                                 yield AnthropicSSEFormatter.block_stop(self._get_current_index())
@@ -501,14 +513,17 @@ class StreamEngine:
                             yield AnthropicSSEFormatter.text_start(idx)
                             self.current_block_type = "text"
 
-                        self.accumulated_text.append(content)
-                        if content.strip() or content == " ":
+                        self.accumulated_text.append(remaining_text)
+                        if remaining_text.strip() or remaining_text == " ":
                             self.text_or_tool_emitted = True
                             import asyncio
 
                             from bot.live_bridge import live_bridge_manager
-                            asyncio.create_task(live_bridge_manager.dispatch_text_chunk(self.session.session_id, content))
-                        yield AnthropicSSEFormatter.text_delta(content, self._get_current_index())
+
+                            asyncio.create_task(
+                                live_bridge_manager.dispatch_text_chunk(self.session.session_id, remaining_text)
+                            )
+                        yield AnthropicSSEFormatter.text_delta(remaining_text, self._get_current_index())
 
         # Flush Thinking Parser
         for flush_ev in await self.thinking_parser.flush():
@@ -521,7 +536,10 @@ class StreamEngine:
                         import asyncio
 
                         from bot.live_bridge import live_bridge_manager
-                        asyncio.create_task(live_bridge_manager.dispatch_thinking_chunk(self.session.session_id, think_val))
+
+                        asyncio.create_task(
+                            live_bridge_manager.dispatch_thinking_chunk(self.session.session_id, think_val)
+                        )
                 elif dtype == "text_delta":
                     text_val = getattr(flush_ev.delta, "text", "")
                     self.accumulated_text.append(text_val)

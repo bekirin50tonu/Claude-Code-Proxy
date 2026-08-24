@@ -545,7 +545,7 @@ async def handle_circuit_breaker_action(req: CircuitBreakerActionRequest) -> JSO
     action_lower = req.action.lower().strip()
     if action_lower in ("reset", "open_traffic", "enable", "clear", "open"):
         # User requested to clear timeout & reset circuit breaker to working/CLOSED state
-        cb.reset()
+        await cb.reset()
         return JSONResponse(
             content={
                 "status": "success",
@@ -555,7 +555,7 @@ async def handle_circuit_breaker_action(req: CircuitBreakerActionRequest) -> JSO
         )
     elif action_lower in ("trip", "block", "close_traffic", "disable", "close"):
         # User requested to block model / force circuit breaker to OPEN state (extending timeout 1m -> 5m -> 10m -> 15m -> 30m -> 60m)
-        new_timeout = cb.trip_or_extend(reason="Manually blocked via Dashboard")
+        new_timeout = await cb.trip_or_extend(reason="Manually blocked via Dashboard")
         mins = int(new_timeout // 60)
         return JSONResponse(
             content={
@@ -605,7 +605,7 @@ async def get_router_status() -> JSONResponse:
         step_name = "NONE"
 
         for idx, cand in enumerate(all_chain):
-            if model_router._is_available(cand):
+            if await model_router._is_available(cand):
                 resolved = cand
                 is_fallback = idx > 0
                 step_name = "PRIMARY DIRECT" if idx == 0 else f"FALLBACK #{idx}"

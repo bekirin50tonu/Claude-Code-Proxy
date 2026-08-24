@@ -51,69 +51,68 @@ class ThinkingParser(BaseAtomicParser):
         return events
 
 
-    async def process_chunk(self, chunk: dict[str, Any] | str) -> list[SSEBaseEvent]:
+    async def process_chunk_pipeline(self, chunk: dict[str, Any] | str) -> tuple[list[SSEBaseEvent], str]:
+        """
+        Linear pipeline parser step. Returns (thinking_events, clean_text_fragment).
+        Any text outside thinking blocks is extracted into clean_text_fragment for downstream tool parsing.
+        """
         events: list[SSEBaseEvent] = []
+        clean_text_parts: list[str] = []
 
-        # Handle native reasoning_content field in OpenAI deltas
         if isinstance(chunk, dict):
             delta = chunk.get("choices", [{}])[0].get("delta", {})
             reasoning = delta.get("reasoning_content") or ""
             if reasoning:
                 idx = self._ensure_block("thinking", events)
                 events.append(ModelConverter.build_sse_block_delta(idx, "thinking_delta", reasoning))
-                return events
-
-            content = delta.get("content") or ""
-            text = content
+                return events, ""
+            text = delta.get("content") or ""
         else:
             text = chunk
 
         if not text:
-            return events
+            return events, ""
 
         self.buffer += text
 
-        # Clean malformed tags like "<think</think" or "<think></think>"
         if self.buffer.startswith("<think</think"):
             self.buffer = self.buffer[len("<think</think") :]
 
         while self.buffer:
             if not self.in_think_tag:
-                # Look for opening <think> or <thought> tag
                 match = re.search(r"<(think|thought)>", self.buffer, re.IGNORECASE)
                 if match:
                     think_start = match.start()
                     think_end_tag = match.end()
                     prefix = self.buffer[:think_start]
                     if prefix:
-                        idx = self._ensure_block("text", events)
-                        events.append(ModelConverter.build_sse_block_delta(idx, "text_delta", prefix))
+                        clean_text_parts.append(prefix)
 
-                    # Switch to thinking
                     idx = self._ensure_block("thinking", events)
                     self.in_think_tag = True
                     self.buffer = self.buffer[think_end_tag:]
                     continue
 
-                # Check for partial opening tag at the end of buffer (e.g. "<th", "<think")
                 partial_idx = self.buffer.rfind("<")
-                if partial_idx != -1 and any(["<think>".startswith(self.buffer[partial_idx:].lower()), "<thought>".startswith(self.buffer[partial_idx:].lower())]):
+                if partial_idx != -1 and any(
+                    [
+                        "<think>".startswith(self.buffer[partial_idx:].lower()),
+                        "<thought>".startswith(self.buffer[partial_idx:].lower()),
+                    ]
+                ):
                     text_to_flush = self.buffer[:partial_idx]
                     fragment = self.buffer[partial_idx:]
                     self.buffer = fragment
-                    from loguru import logger
-                    logger.info("🔄 \033[1;34m[ThinkingStatefulParser]\033[0m Buffered partial opening tag '{}' across chunk boundary.", fragment)
+                    if text_to_flush:
+                        clean_text_parts.append(text_to_flush)
                 else:
                     text_to_flush = self.buffer
                     self.buffer = ""
-
-                if text_to_flush:
-                    idx = self._ensure_block("text", events)
-                    events.append(ModelConverter.build_sse_block_delta(idx, "text_delta", text_to_flush))
+                    if text_to_flush:
+                        clean_text_parts.append(text_to_flush)
                 break
 
             else:
-                # In think tag: look for closing </think> or </thought>
                 match = re.search(r"</(think|thought)>", self.buffer, re.IGNORECASE)
                 if match:
                     think_end_start = match.start()
@@ -128,24 +127,34 @@ class ThinkingParser(BaseAtomicParser):
                     self.buffer = self.buffer[think_end_finish:]
                     continue
 
-                # Check for partial closing tag at end of buffer (e.g. "</th", "</think")
                 partial_idx = self.buffer.rfind("<")
-                if partial_idx != -1 and any(["</think>".startswith(self.buffer[partial_idx:].lower()), "</thought>".startswith(self.buffer[partial_idx:].lower())]):
+                if partial_idx != -1 and any(
+                    [
+                        "</think>".startswith(self.buffer[partial_idx:].lower()),
+                        "</thought>".startswith(self.buffer[partial_idx:].lower()),
+                    ]
+                ):
                     thinking_to_flush = self.buffer[:partial_idx]
                     fragment = self.buffer[partial_idx:]
                     self.buffer = fragment
-                    from loguru import logger
-                    logger.info("🔄 \033[1;34m[ThinkingStatefulParser]\033[0m Buffered partial closing tag '{}' across chunk boundary.", fragment)
+                    if thinking_to_flush:
+                        idx = self._ensure_block("thinking", events)
+                        events.append(ModelConverter.build_sse_block_delta(idx, "thinking_delta", thinking_to_flush))
                 else:
                     thinking_to_flush = self.buffer
                     self.buffer = ""
-
-
-                if thinking_to_flush:
-                    idx = self._ensure_block("thinking", events)
-                    events.append(ModelConverter.build_sse_block_delta(idx, "thinking_delta", thinking_to_flush))
+                    if thinking_to_flush:
+                        idx = self._ensure_block("thinking", events)
+                        events.append(ModelConverter.build_sse_block_delta(idx, "thinking_delta", thinking_to_flush))
                 break
 
+        return events, "".join(clean_text_parts)
+
+    async def process_chunk(self, chunk: dict[str, Any] | str) -> list[SSEBaseEvent]:
+        events, clean_text = await self.process_chunk_pipeline(chunk)
+        if clean_text:
+            idx = self._ensure_block("text", events)
+            events.append(ModelConverter.build_sse_block_delta(idx, "text_delta", clean_text))
         return events
 
     async def flush(self) -> list[SSEBaseEvent]:

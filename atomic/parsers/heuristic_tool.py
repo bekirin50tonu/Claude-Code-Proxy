@@ -15,6 +15,10 @@ class HeuristicToolParser(BaseAtomicParser):
 
     BASH_FENCE_REGEX = re.compile(r"```(?:bash|sh|shell|zsh)\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
     JSON_FENCE_REGEX = re.compile(r"```(?:json|JSON)?\s*\n({.*?})\n```", re.DOTALL)
+    XML_TOOL_CALL_REGEX = re.compile(
+        r"<tool_call>\s*(?:<<|#<|<)?function=([\w_]+)>>?\s*(.*?)</tool_call>",
+        re.DOTALL | re.IGNORECASE,
+    )
 
     def __init__(
         self,
@@ -49,7 +53,33 @@ class HeuristicToolParser(BaseAtomicParser):
             return True
         return name in self.allowed_tool_names
 
-    async def process_chunk(self, chunk: dict[str, Any] | str) -> list[SSEBaseEvent]:
+    @classmethod
+    def mask_code_generics(cls, text: str) -> str:
+        """Mask double angle brackets ('<<' / '>>') inside programming codeblocks to avoid false XML tag matches."""
+        if not text or "```" not in text:
+            return text
+
+        def replace_codeblock(match: re.Match[str]) -> str:
+            lang = match.group(1).lower() if match.group(1) else ""
+            body = match.group(2)
+            if lang in ("bash", "sh", "shell", "zsh", "json"):
+                return match.group(0)
+            # Mask << and >> in programming code blocks
+            masked_body = body.replace("<<", "«").replace(">>", "»")
+            return f"```{lang}\n{masked_body}\n```"
+
+        return re.sub(r"```([\w_]*)\n(.*?)\n```", replace_codeblock, text, flags=re.DOTALL)
+
+    @classmethod
+    def unmask_code_generics(cls, text: str) -> str:
+        """Restore double angle brackets in codeblocks."""
+        return text.replace("«", "<<").replace("»", ">>")
+
+    async def process_chunk_pipeline(self, chunk: dict[str, Any] | str) -> tuple[list[SSEBaseEvent], str]:
+        """
+        Linear pipeline step. Returns (events, remaining_unemitted_text).
+        Yields tool_use SSE events if tool matched, or returns plain text fragment if no tool matched.
+        """
         events: list[SSEBaseEvent] = []
         text = chunk if isinstance(chunk, str) else ""
         if isinstance(chunk, dict):
@@ -57,24 +87,68 @@ class HeuristicToolParser(BaseAtomicParser):
             text = delta.get("content") or ""
 
         if not text:
-            return events
+            return events, ""
 
         self.text_buffer += text
+        masked_buffer = self.mask_code_generics(self.text_buffer)
 
-        # Check for bash code blocks (```bash ... ```)
-        bash_match = self.BASH_FENCE_REGEX.search(self.text_buffer)
+        # 1. Check for XML tool call structure: <tool_call>...<<function=...>>...</tool_call>
+        xml_match = self.XML_TOOL_CALL_REGEX.search(masked_buffer)
+        if xml_match:
+            func_name = xml_match.group(1).strip()
+            body = xml_match.group(2)
+            func_name = self.unmask_code_generics(func_name)
+
+            params: dict[str, Any] = {}
+            param_matches = re.findall(r"(?:<<|#<|<)?parameter=([\w_]+)>>?(.*?)</parameter>", body, re.DOTALL)
+            for p_name, p_val in param_matches:
+                params[p_name.strip()] = self.unmask_code_generics(p_val.strip())
+
+            # Fallback if body contains JSON
+            if not params and "{" in body:
+                try:
+                    parsed_body = json.loads(body.strip(), strict=False)
+                    if isinstance(parsed_body, dict):
+                        params = parsed_body.get("parameters") or parsed_body.get("arguments") or parsed_body.get("input") or {}
+                except Exception:
+                    pass
+
+            target_tool = func_name
+            if not self._is_tool_allowed(target_tool):
+                for alt in ("Bash", "ExecuteCommand", "run_command", "Edit", "Write", "View"):
+                    if self._is_tool_allowed(alt) and alt.lower() == func_name.lower():
+                        target_tool = alt
+                        break
+
+            prefix = self.unmask_code_generics(self.text_buffer[: xml_match.start()].strip())
+            if prefix:
+                idx = self._get_next_index()
+                events.append(ModelConverter.build_sse_block_start(idx, "text"))
+                events.append(ModelConverter.build_sse_block_delta(idx, "text_delta", prefix))
+                events.append(ModelConverter.build_sse_block_stop(idx))
+
+            t_id = f"toolu_{uuid.uuid4().hex[:10]}"
+            t_idx = self._get_next_index()
+            events.append(ModelConverter.build_sse_block_start(t_idx, "tool_use", {"id": t_id, "name": target_tool}))
+            events.append(ModelConverter.build_sse_block_delta(t_idx, "input_json_delta", json.dumps(params)))
+            events.append(ModelConverter.build_sse_block_stop(t_idx))
+
+            self.text_buffer = self.unmask_code_generics(self.text_buffer[xml_match.end() :])
+            return events, ""
+
+        # 2. Check for bash code blocks (```bash ... ```)
+        bash_match = self.BASH_FENCE_REGEX.search(masked_buffer)
         if bash_match:
-            cmd_text = bash_match.group(1).strip()
+            cmd_text = self.unmask_code_generics(bash_match.group(1).strip())
             target_tool = "run_command"
             if not self._is_tool_allowed(target_tool):
-                # Fallback check if Bash or execute_command is allowed instead
                 for alt in ("Bash", "ExecuteCommand", "bash", "execute_command"):
                     if self._is_tool_allowed(alt):
                         target_tool = alt
                         break
 
             if self._is_tool_allowed(target_tool):
-                prefix = self.text_buffer[: bash_match.start()].strip()
+                prefix = self.unmask_code_generics(self.text_buffer[: bash_match.start()].strip())
                 if prefix:
                     idx = self._get_next_index()
                     events.append(ModelConverter.build_sse_block_start(idx, "text"))
@@ -89,19 +163,19 @@ class HeuristicToolParser(BaseAtomicParser):
                 events.append(ModelConverter.build_sse_block_delta(t_idx, "input_json_delta", json.dumps(t_input)))
                 events.append(ModelConverter.build_sse_block_stop(t_idx))
 
-                self.text_buffer = self.text_buffer[bash_match.end() :]
-                return events
+                self.text_buffer = self.unmask_code_generics(self.text_buffer[bash_match.end() :])
+                return events, ""
 
-        # Check for JSON tool calls embedded in codeblocks or text
-        json_match = self.JSON_FENCE_REGEX.search(self.text_buffer)
+        # 3. Check for JSON tool calls embedded in codeblocks or text
+        json_match = self.JSON_FENCE_REGEX.search(masked_buffer)
         if json_match:
-            raw_json = json_match.group(1).strip()
+            raw_json = self.unmask_code_generics(json_match.group(1).strip())
             try:
                 parsed = json.loads(raw_json)
                 if isinstance(parsed, dict) and "name" in parsed:
                     tool_name = parsed["name"]
                     if self._is_tool_allowed(tool_name):
-                        prefix = self.text_buffer[: json_match.start()].strip()
+                        prefix = self.unmask_code_generics(self.text_buffer[: json_match.start()].strip())
                         if prefix:
                             idx = self._get_next_index()
                             events.append(ModelConverter.build_sse_block_start(idx, "text"))
@@ -118,42 +192,105 @@ class HeuristicToolParser(BaseAtomicParser):
                         events.append(ModelConverter.build_sse_block_delta(t_idx, "input_json_delta", json.dumps(tool_input)))
                         events.append(ModelConverter.build_sse_block_stop(t_idx))
 
-                        self.text_buffer = self.text_buffer[json_match.end() :]
-                        return events
+                        self.text_buffer = self.unmask_code_generics(self.text_buffer[json_match.end() :])
+                        return events, ""
             except Exception:
                 pass
 
-        # Stateful partial tag buffering across chunk boundaries
-        partial_prefixes = ("<tool_call", "<function=", "<parameter=", "[TOOL_CALL", "```bash", "```json")
+        # 4. Check for open unclosed tool block or partial tag at end of buffer across chunk boundaries
+        tool_openers = (r"```(?:json|JSON|bash|sh|shell|zsh)?", r"<tool_call>", r"\[TOOL_CALLS?\]", r"<(?:function|parameter)=")
+        for pattern in tool_openers:
+            open_match = re.search(pattern, masked_buffer, re.IGNORECASE)
+            if open_match:
+                prefix = self.unmask_code_generics(self.text_buffer[: open_match.start()])
+                if prefix.strip():
+                    idx = self._get_next_index()
+                    events.append(ModelConverter.build_sse_block_start(idx, "text"))
+                    events.append(ModelConverter.build_sse_block_delta(idx, "text_delta", prefix))
+                    events.append(ModelConverter.build_sse_block_stop(idx))
+                
+                self.text_buffer = self.unmask_code_generics(self.text_buffer[open_match.start() :])
+                from loguru import logger
+                logger.info("🔄 \033[1;34m[HeuristicToolStatefulParser]\033[0m Buffered open tool block '{}' across chunk boundary.", pattern)
+                return events, ""
+
+        # 5. Check for partial tag prefix at very end of buffer
+        partial_prefixes = ("<tool_call", "<function=", "<<function=", "<parameter=", "<<parameter=", "[TOOL_CALL", "```bash", "```json")
         for tag in partial_prefixes:
-            for i in range(1, len(tag)):
+            for i in range(3, len(tag) + 1):
                 sub = tag[:i]
                 if self.text_buffer.endswith(sub):
                     from loguru import logger
                     logger.info("🔄 \033[1;34m[HeuristicToolStatefulParser]\033[0m Buffered partial tool tag '{}' across chunk boundary.", sub)
-                    return events
+                    return events, ""
 
+        # Plain text remaining in buffer
+        remaining_text = self.text_buffer
+        self.text_buffer = ""
+        return events, remaining_text
+
+    async def process_chunk(self, chunk: dict[str, Any] | str) -> list[SSEBaseEvent]:
+        events, remaining = await self.process_chunk_pipeline(chunk)
+        if remaining:
+            idx = self._get_next_index()
+            events.append(ModelConverter.build_sse_block_start(idx, "text"))
+            events.append(ModelConverter.build_sse_block_delta(idx, "text_delta", remaining))
+            events.append(ModelConverter.build_sse_block_stop(idx))
         return events
 
     async def flush(self) -> list[SSEBaseEvent]:
         events: list[SSEBaseEvent] = []
         if self.text_buffer:
-            bash_match = self.BASH_FENCE_REGEX.search(self.text_buffer)
-            if bash_match:
-                cmd_text = bash_match.group(1).strip()
-                target_tool = "run_command"
-                if not self._is_tool_allowed(target_tool):
-                    for alt in ("Bash", "ExecuteCommand", "bash", "execute_command"):
-                        if self._is_tool_allowed(alt):
-                            target_tool = alt
-                            break
-                if self._is_tool_allowed(target_tool):
-                    t_id = f"toolu_{uuid.uuid4().hex[:10]}"
-                    t_input = {"command": cmd_text} if target_tool in ("Bash", "bash") else {"CommandLine": cmd_text}
-                    t_idx = self._get_next_index()
-                    events.append(ModelConverter.build_sse_block_start(t_idx, "tool_use", {"id": t_id, "name": target_tool}))
-                    events.append(ModelConverter.build_sse_block_delta(t_idx, "input_json_delta", json.dumps(t_input)))
-                    events.append(ModelConverter.build_sse_block_stop(t_idx))
+            masked_buffer = self.mask_code_generics(self.text_buffer)
+            xml_match = self.XML_TOOL_CALL_REGEX.search(masked_buffer)
+            if xml_match:
+                func_name = self.unmask_code_generics(xml_match.group(1).strip())
+                body = xml_match.group(2)
+                params: dict[str, Any] = {}
+                param_matches = re.findall(r"(?:<<|#<|<)?parameter=([\w_]+)>>?(.*?)</parameter>", body, re.DOTALL)
+                for p_name, p_val in param_matches:
+                    params[p_name.strip()] = self.unmask_code_generics(p_val.strip())
+                t_id = f"toolu_{uuid.uuid4().hex[:10]}"
+                t_idx = self._get_next_index()
+                events.append(ModelConverter.build_sse_block_start(t_idx, "tool_use", {"id": t_id, "name": func_name}))
+                events.append(ModelConverter.build_sse_block_delta(t_idx, "input_json_delta", json.dumps(params)))
+                events.append(ModelConverter.build_sse_block_stop(t_idx))
+            else:
+                json_match = self.JSON_FENCE_REGEX.search(masked_buffer)
+                if json_match:
+                    raw_json = self.unmask_code_generics(json_match.group(1).strip())
+                    try:
+                        parsed = json.loads(raw_json)
+                        if isinstance(parsed, dict) and "name" in parsed:
+                            tool_name = parsed["name"]
+                            if self._is_tool_allowed(tool_name):
+                                tool_input = parsed.get("parameters") or parsed.get("arguments") or parsed.get("input") or {}
+                                if not isinstance(tool_input, dict):
+                                    tool_input = {}
+                                t_id = f"toolu_{uuid.uuid4().hex[:10]}"
+                                t_idx = self._get_next_index()
+                                events.append(ModelConverter.build_sse_block_start(t_idx, "tool_use", {"id": t_id, "name": tool_name}))
+                                events.append(ModelConverter.build_sse_block_delta(t_idx, "input_json_delta", json.dumps(tool_input)))
+                                events.append(ModelConverter.build_sse_block_stop(t_idx))
+                    except Exception:
+                        pass
+                else:
+                    bash_match = self.BASH_FENCE_REGEX.search(masked_buffer)
+                    if bash_match:
+                        cmd_text = self.unmask_code_generics(bash_match.group(1).strip())
+                        target_tool = "run_command"
+                        if not self._is_tool_allowed(target_tool):
+                            for alt in ("Bash", "ExecuteCommand", "bash", "execute_command"):
+                                if self._is_tool_allowed(alt):
+                                    target_tool = alt
+                                    break
+                        if self._is_tool_allowed(target_tool):
+                            t_id = f"toolu_{uuid.uuid4().hex[:10]}"
+                            t_input = {"command": cmd_text} if target_tool in ("Bash", "bash") else {"CommandLine": cmd_text}
+                            t_idx = self._get_next_index()
+                            events.append(ModelConverter.build_sse_block_start(t_idx, "tool_use", {"id": t_id, "name": target_tool}))
+                            events.append(ModelConverter.build_sse_block_delta(t_idx, "input_json_delta", json.dumps(t_input)))
+                            events.append(ModelConverter.build_sse_block_stop(t_idx))
             self.text_buffer = ""
         return events
 

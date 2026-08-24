@@ -144,19 +144,15 @@ class ModelConverter:
             # Build user tool_result messages
             elif role == "user":
                 if tool_results:
+                    from atomic.sanitizers.rtk_compressor import RedundantTokenKiller
                     for tr in tool_results:
                         tr_content = tr.get("content", "")
-                        if isinstance(tr_content, list):
-                            tr_content = "\n".join(
-                                item.get("text", "")
-                                for item in tr_content
-                                if isinstance(item, dict) and item.get("type") == "text"
-                            )
+                        compressed_content = RedundantTokenKiller.compress_log(tr_content)
                         openai_msgs.append(
                             {
                                 "role": "tool",
                                 "tool_call_id": tr.get("tool_use_id", ""),
-                                "content": str(tr_content),
+                                "content": compressed_content,
                             }
                         )
                 else:
