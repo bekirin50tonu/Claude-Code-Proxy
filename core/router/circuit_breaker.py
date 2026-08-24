@@ -23,7 +23,12 @@ TIMEOUT_STEPS = [
     86400.0,   # 10th trip+: 1440m (24 hours / 1 day)
 ]
 
-STORAGE_FILE = os.path.abspath(
+STORAGE_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", ".data", "state")
+)
+os.makedirs(STORAGE_DIR, exist_ok=True)
+STORAGE_FILE = os.path.join(STORAGE_DIR, "circuit_breakers.yaml")
+LEGACY_STORAGE_FILE = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", ".data", "circuit_breakers.yaml")
 )
 
@@ -251,7 +256,16 @@ class CircuitBreakerRegistry:
 
     def _load_from_file(self, force: bool = False) -> None:
         """Load and restore persisted OPEN circuit breaker states from storage file."""
-        if ("PYTEST_CURRENT_TEST" in os.environ and not force) or not os.path.exists(STORAGE_FILE):
+        if "PYTEST_CURRENT_TEST" in os.environ and not force:
+            return
+        if not os.path.exists(STORAGE_FILE) and os.path.exists(LEGACY_STORAGE_FILE):
+            try:
+                os.replace(LEGACY_STORAGE_FILE, STORAGE_FILE)
+                logger.info(f"Migrated legacy circuit_breakers.yaml -> {STORAGE_FILE}")
+            except Exception as e:
+                logger.warning(f"Failed to migrate legacy circuit_breakers.yaml: {e}")
+
+        if not os.path.exists(STORAGE_FILE):
             return
         try:
             with open(STORAGE_FILE, encoding="utf-8") as f:

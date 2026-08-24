@@ -22,7 +22,8 @@ claude-code-proxy/
 │   ├── router/         # ModelSelector, CircuitBreaker (Async/Lock & Atomic Persistence), DailyTracker
 │   └── transformer/    # StreamEngine (Akış orkestratörü)
 ├── cli/                # Terminal arayüzü ve oturum yönetimi (session.py, main.py)
-├── config/             # Ayarlar (.env, subagent_policy.yaml) ve model kataloğu (models.yaml)
+├── config/             # Python ayarlar ve konfigürasyon modülleri (config.py)
+├── .data/              # Yapılandırma ve durum verileri (.data/config/, .data/state/)
 ├── api/                # Dashboard, MCP Server (api/mcp.py), Prometheus Metrics (api/metrics.py) & Claude Settings Bridge (api/settings_manager.py)
 ├── messaging/          # Telegram & Discord bot uzaktan yönetim entegrasyonu (Sanitized prompt injection)
 ├── mcp_server.py       # Hermes Agent Stdio MCP sunucusu
@@ -38,7 +39,7 @@ claude-code-proxy/
 - **O(1) Sliding Window Rate Limiter (`core/gateway.py`):** Dizi filtreleme O(n) işleminden `collections.deque` yapısına geçilerek O(1) akış kontrolü sağlandı. `time.time()` yerine `time.monotonic()` kullanılarak sistem saati değişimlerinden etkilenmeyen tutarlı zamanlama sağlandı.
 - **Preflight Probe Yanlış Pozitif Düzeltmesi (`atomic/guards/preflight.py`):** 4xx istemci yanıtlarında Circuit Breaker tetiklenmesi önlendi (yalnızca loglama yapılır); sadece 5xx sunucu hataları Circuit Breaker sayacını artırır.
 - **Thread-Safe Key Rotation (`providers/openai.py`):** Sağlayıcı API key havuzu `asyncio.Lock` ile korunarak concurrent isteklerde mükerrer key kullanımı engellendi.
-- **Atomik Dosya Kaydı (`core/router/circuit_breaker.py`):** Breaker durumları `.tmp` dosyasına yazılıp `os.replace` ile atomik olarak kaydedilir, çökme anında YAML bozulması engellenir.
+- **Atomik Dosya Kaydı (`core/router/circuit_breaker.py`):** Breaker durumları `.data/state/circuit_breakers.yaml.tmp` dosyasına yazılıp `os.replace` ile atomik olarak kaydedilir.
 
 ### 2. Docker Secrets Entegrasyonu (`docker-compose.yml` & `config/config.py`)
 - Hassas API anahtarları (`NVIDIA_NIM_API_KEY`, `OPENROUTER_API_KEY`, `GATEWAY_AUTH_TOKEN`) öncelikli olarak `/run/secrets/` dizininden okunur; bulunamazsa `.env` değişkenlerine düşer.
@@ -50,7 +51,7 @@ claude-code-proxy/
 - Telegram üzerinden kuyruğa alınan komutlar HTML escape, 2000 karakter sınırlandırması ve yasaklı enjeksiyon dizilim süzgecinden geçirilir.
 
 ### 5. YAML-Driven Subagent Policy Engine (`atomic/guards/subagent_policy.py`)
-- Subagent araç çalıştırma kuralları `config/subagent_policy.yaml` dosyasından okunur; `SubagentPolicyEngine` izin/engel kararlarını denetler ve denetim günlüğü tutar.
+- Subagent araç çalıştırma kuralları `.data/config/subagent_policy.yaml` dosyasından okunur; `SubagentPolicyEngine` izin/engel kararlarını denetler ve denetim günlüğü tutar.
 
 ### 6. Claude Code Settings Bridge (`api/settings_manager.py`)
 - `~/.claude.json` (Kullanıcı), `.claude.json` (Proje) ve Yerel ayarları birleştirir. `sync_proxy_to_claude` aracı ile CLI yönlendirmesi otomatik yapılandırılır.

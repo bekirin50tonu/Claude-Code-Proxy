@@ -28,24 +28,32 @@ else:
     load_dotenv()
 
 DATA_DIR = Path(__file__).parent.parent / ".data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_DATA_DIR = DATA_DIR / "config"
+STATE_DATA_DIR = DATA_DIR / "state"
 
-_MODELS_YAML_PATH = DATA_DIR / "models.yaml"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_DATA_DIR.mkdir(parents=True, exist_ok=True)
+STATE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+_MODELS_YAML_PATH = CONFIG_DATA_DIR / "models.yaml"
 
 
 def _ensure_models_yaml_exists() -> None:
-    """Ensure .data/models.yaml exists, generating or migrating from config/models.yaml if missing."""
+    """Ensure .data/config/models.yaml exists, generating or migrating from legacy locations if missing."""
     if _MODELS_YAML_PATH.exists():
         return
 
-    legacy_path = Path(__file__).parent / "models.yaml"
-    if legacy_path.exists():
-        try:
-            _MODELS_YAML_PATH.write_text(legacy_path.read_text(encoding="utf-8"), encoding="utf-8")
-            logger.info("Migrated config/models.yaml -> .data/models.yaml")
-            return
-        except Exception as e:
-            logger.warning(f"Failed to migrate legacy models.yaml: {e}")
+    legacy_data_path = DATA_DIR / "models.yaml"
+    legacy_config_path = Path(__file__).parent / "models.yaml"
+
+    for legacy_path in (legacy_data_path, legacy_config_path):
+        if legacy_path.exists():
+            try:
+                _MODELS_YAML_PATH.write_text(legacy_path.read_text(encoding="utf-8"), encoding="utf-8")
+                logger.info(f"Migrated {legacy_path} -> {_MODELS_YAML_PATH}")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to migrate legacy models.yaml from {legacy_path}: {e}")
 
     default_yaml_content = """claude_default:
   display_name: 1. Default (Recommended - Opus 5 / Nemotron 70B)

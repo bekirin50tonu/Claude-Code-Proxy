@@ -7,7 +7,12 @@ from typing import Any
 import yaml
 from loguru import logger
 
-POLICY_FILE = Path(__file__).parent.parent.parent / "config" / "subagent_policy.yaml"
+BASE_DIR = Path(__file__).parent.parent.parent
+POLICY_FILE = BASE_DIR / ".data" / "config" / "subagent_policy.yaml"
+LEGACY_POLICY_FILES = [
+    BASE_DIR / "config" / "subagent_policy.yaml",
+    BASE_DIR / ".data" / "subagent_policy.yaml",
+]
 
 
 class SubagentPolicyEngine:
@@ -17,6 +22,17 @@ class SubagentPolicyEngine:
         self.load_policy()
 
     def load_policy(self) -> None:
+        if not POLICY_FILE.exists():
+            for leg in LEGACY_POLICY_FILES:
+                if leg.exists():
+                    try:
+                        POLICY_FILE.parent.mkdir(parents=True, exist_ok=True)
+                        POLICY_FILE.write_text(leg.read_text(encoding="utf-8"), encoding="utf-8")
+                        logger.info(f"Migrated subagent policy from {leg} -> {POLICY_FILE}")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Failed to migrate legacy subagent policy from {leg}: {e}")
+
         if POLICY_FILE.exists():
             try:
                 self._policy = yaml.safe_load(POLICY_FILE.read_text(encoding="utf-8")) or {}

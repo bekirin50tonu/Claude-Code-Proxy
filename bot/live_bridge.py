@@ -11,7 +11,12 @@ from loguru import logger
 from bot.formatters import escape_markdown_v2
 from config import settings
 
-STATE_FILE = os.path.abspath(
+STATE_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", ".data", "state")
+)
+os.makedirs(STATE_DIR, exist_ok=True)
+STATE_FILE = os.path.join(STATE_DIR, "telegram_state.yaml")
+LEGACY_STATE_FILE = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", ".data", "telegram_state.yaml")
 )
 
@@ -56,8 +61,17 @@ class LiveBridgeManager:
             logger.warning(f"Failed to save live bridge state to {STATE_FILE}: {e}")
 
     def load_state(self) -> None:
-        """Load active watchers and workspace settings from .data/telegram_state.yaml."""
-        if "PYTEST_CURRENT_TEST" in os.environ or not os.path.exists(STATE_FILE):
+        """Load active watchers and workspace settings from .data/state/telegram_state.yaml."""
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
+        if not os.path.exists(STATE_FILE) and os.path.exists(LEGACY_STATE_FILE):
+            try:
+                os.replace(LEGACY_STATE_FILE, STATE_FILE)
+                logger.info(f"Migrated legacy telegram_state.yaml -> {STATE_FILE}")
+            except Exception as e:
+                logger.warning(f"Failed to migrate legacy telegram_state.yaml: {e}")
+
+        if not os.path.exists(STATE_FILE):
             return
         try:
             with open(STATE_FILE, encoding="utf-8") as f:
