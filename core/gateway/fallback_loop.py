@@ -108,9 +108,7 @@ async def try_models(
                     max_tokens=clamped_max_tokens,
                 )
 
-                if stream:
-                    assert hasattr(upstream_res, "__aiter__")
-
+                if stream and not isinstance(upstream_res, tuple):
                     session_id = request.headers.get("x-session-id") or request.headers.get("x-conversation-id")
                     engine = StreamEngine(target_model=client_model, tools=tools, session_id=session_id, is_stop_hook=is_stop_hook)
                     guarded_stream = guarded(
