@@ -173,7 +173,7 @@ async def try_models(
                     translated["model"] = client_model
 
                     if is_stop_hook:
-                        translated = await JSONRepairNormalizer.process_response_dict(translated)
+                        translated = await JSONRepairNormalizer.process_response_dict(translated, is_stop_hook=True)
 
                     record_request_log(
                         "POST",

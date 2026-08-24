@@ -205,7 +205,7 @@ async def test_json_repair_response_dict_integration() -> None:
         "stop_reason": "end_turn",
     }
 
-    repaired_resp = await JSONRepairNormalizer.process_response_dict(raw_response)
+    repaired_resp = await JSONRepairNormalizer.process_response_dict(raw_response, is_stop_hook=True)
     text_content = repaired_resp["content"][0]["text"]
 
     repaired_dict = json.loads(text_content)

@@ -311,7 +311,12 @@ class JSONRepairNormalizer:
         return text
 
     @classmethod
-    async def process_response_dict(cls, data: dict[str, Any], subagents_enabled: bool | None = None) -> dict[str, Any]:
+    async def process_response_dict(
+        cls,
+        data: dict[str, Any],
+        subagents_enabled: bool | None = None,
+        is_stop_hook: bool = False,
+    ) -> dict[str, Any]:
         """Process Anthropic message response dict for Stop Hook repair & tool deduplication."""
         if not isinstance(data, dict):
             return data
@@ -331,8 +336,7 @@ class JSONRepairNormalizer:
                 if isinstance(block, dict):
                     if block.get("type") == "text" and "text" in block:
                         raw_text = block["text"]
-                        is_sh = any(kw in raw_text.lower() for kw in cls.TARGET_KEYWORDS)
-                        if is_sh:
+                        if is_stop_hook:
                             block["text"] = await cls.process_text(raw_text, is_stop_hook=True)
                         elif "```json" in raw_text.lower():
                             block["text"] = await cls.process_text(raw_text, is_stop_hook=False)
