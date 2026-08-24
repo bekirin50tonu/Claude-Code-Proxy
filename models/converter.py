@@ -189,12 +189,18 @@ class ModelConverter:
                 think_str = match.group(2).strip()
                 if think_str:
                     reasoning = think_str
-                text_content = (text_content[: match.start()] + text_content[match.end() :]).strip()
-            elif text_content.startswith("<think"):
+                prefix = text_content[: match.start()]
+                suffix = text_content[match.end() :]
+                clean_prefix = re.sub(r"^\s*\d+[`\)]*\s*", "", prefix).strip()
+                text_content = (clean_prefix + " " + suffix.strip()).strip()
+            elif text_content.startswith("<think") or "<think" in text_content.lower():
                 parts = re.split(r"</?(?:think|thought)>", text_content, flags=re.IGNORECASE)
                 if len(parts) >= 2:
                     reasoning = parts[1].strip()
-                    text_content = "".join(parts[2:]).strip()
+                    prefix = parts[0]
+                    suffix = "".join(parts[2:])
+                    clean_prefix = re.sub(r"^\s*\d+[`\)]*\s*", "", prefix).strip()
+                    text_content = (clean_prefix + " " + suffix.strip()).strip()
 
         blocks: list[AnthropicContentBlock] = []
 

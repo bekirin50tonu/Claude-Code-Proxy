@@ -37,6 +37,15 @@ async def test_thinking_parser_split_tags() -> None:
 
 
 @pytest.mark.asyncio
+async def test_thinking_parser_pre_think_noise_filtering() -> None:
+    """Verify ThinkingParser strips orphan list numbers (like 9`) or 4`)) before <think> tags."""
+    parser = ThinkingParser()
+    events, clean_text = await parser.process_chunk_pipeline("9`)\n<think>Internal thought</think>Final answer")
+    assert clean_text == "Final answer"
+    assert any(hasattr(e, "delta") and getattr(e.delta, "thinking", "") == "Internal thought" for e in events)
+
+
+@pytest.mark.asyncio
 async def test_heuristic_tool_parser_bash() -> None:
     """Test HeuristicToolParser extracting ```bash command blocks."""
     parser = HeuristicToolParser()

@@ -86,7 +86,10 @@ class ThinkingParser(BaseAtomicParser):
                     think_end_tag = match.end()
                     prefix = self.buffer[:think_start]
                     if prefix:
-                        clean_text_parts.append(prefix)
+                        # Strip orphan list numbers / backtick artifacts (e.g. "9`)\n" or "4`)\n") before <think>
+                        clean_prefix = re.sub(r"^\s*\d+[`\)]*\s*", "", prefix).strip()
+                        if clean_prefix:
+                            clean_text_parts.append(clean_prefix)
 
                     idx = self._ensure_block("thinking", events)
                     self.in_think_tag = True
