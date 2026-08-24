@@ -122,24 +122,8 @@ class NimThrottleGuard:
                 max_queue_wait=timeout_budget,
             )
 
-        acquired = False
-        try:
-            await asyncio.wait_for(self._concurrency_lock.acquire(), timeout=remaining)
-            acquired = True
-        except TimeoutError as err:
-            waited = time.monotonic() - start_time
-            logger.warning(
-                "NVIDIA NIM queue wait exceeded %.1fs timeout for model '%s'",
-                timeout_budget,
-                model_name,
-            )
-            raise NimQueueTimeoutError(
-                model_name=model_name,
-                waited_seconds=round(waited, 2),
-                max_queue_wait=timeout_budget,
-            ) from err
-
-        try:
+        # Use async with to ensure lock is released even on exception during yield
+        async with asyncio.wait_for(self._concurrency_lock, timeout=remaining):
             # Phase 2: Sliding Window Throttling (38 RPM / 60s)
             while True:
                 now = time.monotonic()
@@ -205,13 +189,6 @@ class NimThrottleGuard:
 
             # Phase 3: Single-lane execution lock held across yield
             yield
-        finally:
-            if acquired:
-                if self._concurrency_lock.locked():
-                    try:
-                        self._concurrency_lock.release()
-                    except RuntimeError:
-                        pass
 
     def reset(self) -> None:
         """Reset state for testing."""

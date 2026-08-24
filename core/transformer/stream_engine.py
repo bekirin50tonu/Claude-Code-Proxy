@@ -550,6 +550,21 @@ class StreamEngine:
                         yield ev.to_sse()
 
                 if clean_text:
+                    if self.accumulated_thinking:
+                        full_think = "".join(self.accumulated_thinking).strip()
+                        if clean_text.strip() and (clean_text.strip() in full_think or full_think.endswith(clean_text.strip())):
+                            clean_text = ""
+                        elif clean_text:
+                            lines = clean_text.splitlines(keepends=True)
+                            filtered_lines = []
+                            for line in lines:
+                                l_str = line.strip()
+                                if l_str and (l_str in full_think or full_think.endswith(l_str)):
+                                    continue
+                                filtered_lines.append(line)
+                            clean_text = "".join(filtered_lines)
+
+                if clean_text:
                     tool_events, remaining_text = await self.heuristic_tool_parser.process_chunk_pipeline(clean_text)
                     if tool_events:
                         for ev in tool_events:

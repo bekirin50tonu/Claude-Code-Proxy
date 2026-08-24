@@ -155,10 +155,9 @@ class CircuitBreaker:
 
     async def is_open(self) -> bool:
         """Return True when requests should be blocked (OPEN state)."""
-        if await self.check_daily_quota():
-            return True
-
         async with self._lock:
+            if await self.check_daily_quota():
+                return True
             if self._state == CircuitState.OPEN:
                 now_wall = time.time()
                 if self.expired_at and now_wall >= self.expired_at:

@@ -1323,6 +1323,28 @@ def test_extract_all_json_tool_calls_case_insensitive_matching() -> None:
     assert tools[0]["input"] == {"command": "ls -la"}
 
 
+def test_reorder_model_fallbacks_endpoint() -> None:
+    """Test /api/dev/models/reorder endpoint updates model fallback chains and preserves order."""
+    from fastapi.testclient import TestClient
+    from config import model_registry
+    from server import app
+
+    client = TestClient(app)
+    new_order = ["nvidia_nim/z-ai/glm-5.2", "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b"]
+
+    resp = client.post(
+        "/api/dev/models/reorder",
+        json={"alias": "claude_default", "fallback_order": new_order},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "success"
+    assert data["fallback_order"] == new_order
+
+    # Verify model_registry returns the exact new fallback order
+    assert model_registry.get_fallbacks("claude_default") == new_order
+
+
 
 
 

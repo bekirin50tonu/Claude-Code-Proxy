@@ -626,6 +626,8 @@ class Settings(BaseModel):
 
     def reload(self) -> None:
         """Reload configurations from the .env file and update settings in-memory."""
+        global _TokenBudgetGuardCls
+        _TokenBudgetGuardCls = None  # Force fresh TokenBudgetGuard with updated encodings
         if env_path.exists():
             load_dotenv(dotenv_path=env_path, override=True)
         else:
