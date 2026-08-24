@@ -216,10 +216,8 @@ function handleWsEvent(payload) {
     const data = payload.data;
 
     if (event === 'initial_state' || event === 'telemetry_pulse') {
-        pollTelemetry();
-        fetchRouterStatus();
+        applyWsTelemetry(data);
     } else if (event === 'request_captured') {
-        pollTelemetry();
         const devPane = document.getElementById('pane-dev');
         if (devPane && devPane.classList.contains('active')) {
             fetchDevPayloads();
@@ -229,6 +227,28 @@ function handleWsEvent(payload) {
     } else if (event === 'config_updated') {
         loadConfigs();
     }
+}
+
+function applyWsTelemetry(data) {
+    if (!data) return;
+    const stats = data.stats || {};
+    const total = stats.total_requests || 0;
+    const mocked = stats.mocked_requests || 0;
+
+    const elReq = document.getElementById('telemetry-requests');
+    if (elReq) elReq.innerHTML = `${total} <span>reqs</span>`;
+
+    const elSave = document.getElementById('telemetry-savings');
+    if (elSave) {
+        const ratio = total > 0 ? Math.round((mocked / total) * 100) : 0;
+        elSave.innerText = `${ratio}%`;
+    }
+
+    const elMock = document.getElementById('telemetry-mock-badge');
+    if (elMock) elMock.innerText = `${mocked} / ${total} SAVES`;
+
+    const elConc = document.getElementById('metrics-active-concurrency');
+    if (elConc) elConc.innerText = stats.active_concurrency || 0;
 }
 
 function startLiveAutoRefresh() {
@@ -365,126 +385,6 @@ async function fetchRouterStatus() {
     try {
         const resp = await fetch('/api/router-status');
         const data = await resp.json();
-        
-        document.getElementById('router-total-models').innerText = data.summary.total_models || 0;
-        document.getElementById('router-healthy-models').innerText = data.summary.healthy || 0;
-        document.getElementById('router-open-circuits').innerText = data.summary.circuit_open || 0;
-
-        // Render Client Request Resolution Mappings
-        const mappingsGrid = document.getElementById('router-client-mappings-grid');
-        if (mappingsGrid && data.client_mappings) {
-            mappingsGrid.innerHTML = '';
-            data.client_mappings.forEach(m => {
-                const card = document.createElement('div');
-                card.style.background = '#050608';
-                card.style.border = m.is_fallback ? '1px solid #eab308' : '1px solid var(--border-subtle)';
-                card.style.padding = '1rem';
-                card.style.borderRadius = '8px';
-                card.style.display = 'flex';
-                card.style.flexDirection = 'column';
-                card.style.gap = '6px';
-
-                const headerRow = document.createElement('div');
-                headerRow.style.display = 'flex';
-                headerRow.style.justifyContent = 'space-between';
-                headerRow.style.alignItems = 'center';
-
-                const titleSpan = document.createElement('span');
-                titleSpan.style.fontSize = '0.8rem';
-                titleSpan.style.fontWeight = '700';
-                titleSpan.style.color = '#ffffff';
-                titleSpan.innerText = m.label;
-
-                const stepBadge = document.createElement('span');
-                stepBadge.style.fontSize = '0.65rem';
-                stepBadge.style.fontWeight = '800';
-                stepBadge.style.padding = '2px 6px';
-                stepBadge.style.borderRadius = '4px';
-                if (m.is_fallback) {
-                    stepBadge.style.background = 'rgba(234, 179, 8, 0.2)';
-                    stepBadge.style.color = '#fef08a';
-                    stepBadge.style.border = '1px solid #eab308';
-                    stepBadge.innerText = m.step_name;
-                } else {
-                    stepBadge.style.background = 'rgba(34, 197, 94, 0.15)';
-                    stepBadge.style.color = '#4ade80';
-                    stepBadge.style.border = '1px solid #22c55e';
-                    stepBadge.innerText = 'PRIMARY DIRECT';
-                }
-
-                headerRow.appendChild(titleSpan);
-                headerRow.appendChild(stepBadge);
-                card.appendChild(headerRow);
-
-                const activeTarget = document.createElement('div');
-                activeTarget.style.fontSize = '0.75rem';
-                activeTarget.style.fontFamily = "'JetBrains Mono', monospace";
-                activeTarget.style.color = m.is_fallback ? '#fef08a' : '#ffffff';
-                activeTarget.innerHTML = `<strong>Active Target:</strong> ${m.resolved_target}`;
-                card.appendChild(activeTarget);
-
-                const primaryTargetVal = m.primary || (m.chain && m.chain[0]) || '-';
-                const primaryInfo = document.createElement('div');
-                primaryInfo.style.fontSize = '0.7rem';
-                primaryInfo.style.color = 'var(--text-muted)';
-                primaryInfo.innerText = `Primary Target: ${primaryTargetVal}`;
-                card.appendChild(primaryInfo);
-
-                mappingsGrid.appendChild(card);
-            });
-        }
-
-        const tbody = document.getElementById('router-table-body');
-        tbody.innerHTML = '';
-
-        const entries = Object.entries(data.models);
-        if (entries.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" style="padding: 1rem; text-align: center; color: var(--text-muted);">No models routed yet. Try sending a request through the proxy.</td></tr>';
-            return;
-        }
-
-        for (const [modelId, status] of entries) {
-            const tr = document.createElement('tr');
-            tr.style.borderBottom = '1px solid var(--border-subtle)';
-
-            const cb = status.circuit_breaker || {};
-            const rl = status.rate_limit || {};
-
-            const stateColor = cb.state === 'closed' ? '#4ade80' : (cb.state === 'half_open' ? '#facc15' : '#f87171');
-            const headroomColor = rl.has_headroom ? '#4ade80' : '#f87171';
-
-            const reqRem = rl.req_remaining !== null && rl.req_remaining !== undefined ? rl.req_remaining : '∞';
-            const tokRem = rl.tok_remaining !== null && rl.tok_remaining !== undefined ? rl.tok_remaining : '∞';
-
-            let stateDisplay = `● ${cb.state ? cb.state.toUpperCase() : 'CLOSED'}`;
-            if (cb.state === 'open') {
-                if (cb.recovery_remaining_s !== null && cb.recovery_remaining_s !== undefined) {
-                    stateDisplay += ` (${cb.recovery_remaining_s}s remaining, reopens at ${cb.reopens_at_wall || ''})`;
-                } else if (cb.opened_at_wall) {
-                    stateDisplay += ` (Tripped at ${cb.opened_at_wall})`;
-                }
-            } else if (cb.state === 'half_open') {
-                stateDisplay += ' (Probe Ready)';
-            }
-
-            const causeText = cb.last_failure_reason || 'None (Operational)';
-
-            const escapedModelId = modelId.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            const escapedCause = causeText.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-
-            tr.innerHTML = `
-                <td style="padding: 0.75rem 1rem; max-width: 220px;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
-                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: #ffffff;" title="${escapedModelId}">${modelId}</span>
-                        <button type="button" class="btn-copy-icon" onclick="copyTextToClipboard('${escapedModelId}', this)" title="Copy full Model Target ID">Copy</button>
-                    </div>
-                </td>
-                <td style="padding: 0.75rem 1rem; min-width: 140px;"><span style="color: ${stateColor}; font-weight: 700; font-size: 0.7rem;">${stateDisplay}</span></td>
-                <td style="padding: 0.75rem 1rem; max-width: 260px;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;">
-                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: ${cb.state === 'open' ? '#f87171' : 'var(--text-muted)'}; font-size: 0.72rem;" title="${escapedCause}">${causeText}</span>
-                        <button type="button" class="btn-copy-icon" onclick="copyTextToClipboard('${escapedCause}', this)" title="Copy full Failure Reason">Copy</button>
-                    </div>
                 </td>
                 <td style="padding: 0.75rem 1rem; color: var(--text-muted); text-align: center;">${cb.failure_count || 0}</td>
                 <td style="padding: 0.75rem 1rem; white-space: nowrap;"><span style="color: ${headroomColor}; font-weight: 700;">${rl.has_headroom ? 'YES (≥10%)' : 'NO (LIMITED)'}</span></td>

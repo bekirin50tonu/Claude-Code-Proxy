@@ -79,7 +79,7 @@ class DashboardWebSocketManager:
 
     async def _build_initial_snapshot(self) -> dict[str, Any]:
         """Gather current snapshot state across proxy modules."""
-        from config import stats
+        from config import settings, stats
         from core.router.daily_tracker import daily_request_tracker
         from core.router.selector import model_selector
 
@@ -91,6 +91,8 @@ class DashboardWebSocketManager:
                 "mocked_requests": stats.mocked_requests,
                 "error_count": stats.error_count,
                 "active_concurrency": stats.active_concurrency,
+                "ds_bot_status": "Online" if hasattr(settings, "_ds_bot") else "Offline",
+                "tg_bot_status": "Online" if hasattr(settings, "_tg_bot") else "Offline",
             },
             "router_status": {
                 "summary": {
@@ -105,16 +107,16 @@ class DashboardWebSocketManager:
         }
 
     def _ensure_pulse_task(self) -> None:
-        """Ensure background task is pushing 1s telemetry pulse when clients exist."""
+        """Ensure background task is pushing 3s telemetry pulse when clients exist."""
         if self._background_task is None or self._background_task.done():
             self._background_task = asyncio.create_task(self._telemetry_pulse_loop())
 
     async def _telemetry_pulse_loop(self) -> None:
-        """Periodic 1.5s background pulse pushing live telemetry to active WS clients."""
+        """Periodic 3.0s background pulse pushing live telemetry to active WS clients."""
         logger.debug("Starting real-time WebSocket telemetry pulse loop...")
         while True:
             try:
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(3.0)
                 if not self.active_connections:
                     continue
 
