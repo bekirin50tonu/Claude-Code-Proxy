@@ -44,71 +44,64 @@ class JSONRepairNormalizer:
 
     @classmethod
     def is_stop_hook_target(cls, payload: dict[str, Any] | None) -> bool:
-        """Asynchronously detect if request payload targets Stop Hook or sensitive operations."""
+        """Detect if request payload is specifically a Stop Hook execution request."""
         if not payload or not isinstance(payload, dict):
             return False
 
-        # Exclude CLI goal notice ("a session-scoped stop hook is now active") which is a conversational prompt
-        all_text_parts: list[str] = []
+        # 1. Inspect tools definition
+        tools = payload.get("tools")
+        if isinstance(tools, list) and len(tools) > 0:
+            has_stop_hook_tool = False
+            for t in tools:
+                if isinstance(t, dict):
+                    name = str(t.get("name", "")).lower()
+                    if any(kw in name for kw in ("exit_session", "stop_hook", "save_session_summary")):
+                        has_stop_hook_tool = True
+                        break
+            if not has_stop_hook_tool:
+                return False
+            return True
+
+        # 2. Inspect last user message & system prompt
         messages = payload.get("messages", [])
+        last_user_content = ""
         if isinstance(messages, list):
-            for msg in messages:
-                if isinstance(msg, dict):
+            for msg in reversed(messages):
+                if isinstance(msg, dict) and msg.get("role") == "user":
                     c = msg.get("content")
                     if isinstance(c, str):
-                        all_text_parts.append(c)
+                        last_user_content = c
                     elif isinstance(c, list):
-                        for b in c:
-                            if isinstance(b, dict) and b.get("type") == "text":
-                                all_text_parts.append(str(b.get("text", "")))
-        full_text_lower = " ".join(all_text_parts).lower()
-        if "a session-scoped stop hook is now active" in full_text_lower:
-            return False
+                        last_user_content = " ".join(
+                            str(b.get("text", "")) for b in c if isinstance(b, dict) and b.get("type") == "text"
+                        )
+                    break
 
-        # 1. Inspect messages list
-        if isinstance(messages, list):
-            for msg in messages:
-                if isinstance(msg, dict):
-                    content = msg.get("content")
-                    if isinstance(content, str):
-                        lower_content = content.lower()
-                        if any(kw in lower_content for kw in cls.TARGET_KEYWORDS):
-                            logger.info("🔍 [JSONRepair] Target keyword detected in message content.")
-                            return True
-                    elif isinstance(content, list):
-                        for block in content:
-                            if isinstance(block, dict):
-                                text = block.get("text", "") or block.get("content", "")
-                                if isinstance(text, str) and any(kw in text.lower() for kw in cls.TARGET_KEYWORDS):
-                                    logger.info("🔍 [JSONRepair] Target keyword detected in message text block.")
-                                    return True
-
-        # 2. Inspect system prompt
+        system_content = ""
         system = payload.get("system")
         if isinstance(system, str):
-            if any(kw in system.lower() for kw in cls.TARGET_KEYWORDS):
-                logger.info("🔍 [JSONRepair] Target keyword detected in system prompt.")
-                return True
+            system_content = system
         elif isinstance(system, list):
-            for sys_block in system:
-                if isinstance(sys_block, dict):
-                    text = sys_block.get("text", "")
-                    if isinstance(text, str) and any(kw in text.lower() for kw in cls.TARGET_KEYWORDS):
-                        logger.info("🔍 [JSONRepair] Target keyword detected in system prompt list block.")
-                        return True
+            system_content = " ".join(
+                str(b.get("text", "")) for b in system if isinstance(b, dict) and b.get("type") == "text"
+            )
 
-        # 3. Inspect tools list
-        tools = payload.get("tools", [])
-        if isinstance(tools, list):
-            for tool in tools:
-                if isinstance(tool, dict):
-                    name = tool.get("name", "")
-                    desc = tool.get("description", "")
-                    if any(kw in name.lower() for kw in cls.TARGET_KEYWORDS) or any(kw in desc.lower() for kw in cls.TARGET_KEYWORDS):
-                        logger.info("🔍 [JSONRepair] Target keyword detected in tools definition.")
-                        return True
+        combined = f"{last_user_content} {system_content}".lower()
 
-        return False
+        # Exclude CLI goal notice ("a session-scoped stop hook is now active")
+        if "a session-scoped stop hook is now active" in combined:
+            return False
+
+        stop_hook_specific_patterns = (
+            "stop_hook",
+            "stop hook",
+            "stop_hook_active",
+            "save_session_summary",
+            "exit_session",
+            "session_summary",
+            "return the stop hook",
+        )
+        return any(pat in combined for pat in stop_hook_specific_patterns)
 
     @classmethod
     def fix_angle_brackets(cls, text: str) -> str:
