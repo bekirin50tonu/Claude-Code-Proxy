@@ -179,7 +179,7 @@ async def test_process_text_pipeline() -> None:
         "}\n"
         "```"
     )
-    processed_json = await JSONRepairNormalizer.process_text(raw_input)
+    processed_json = await JSONRepairNormalizer.process_text(raw_input, is_stop_hook=True)
     parsed = json.loads(processed_json)
     assert parsed["summary"] == "Refactored code"
     assert parsed["memory"] == ["Remember to test"]

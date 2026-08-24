@@ -290,13 +290,10 @@ class JSONRepairNormalizer:
         return DeDuplicator.deduplicate(content_list)
 
     @classmethod
-    async def process_text(cls, text: str, is_stop_hook: bool | None = None) -> str:
+    async def process_text(cls, text: str, is_stop_hook: bool = False) -> str:
         """Complete pipeline: sanitize markdown -> repair JSON -> normalize schema -> serialize."""
         if not text or not isinstance(text, str):
             return text
-
-        if is_stop_hook is None:
-            is_stop_hook = any(kw in text.lower() for kw in cls.TARGET_KEYWORDS)
 
         sanitized = await cls.sanitize_markdown_json(text)
         repaired_data = await cls.heuristic_repair_json(sanitized)
