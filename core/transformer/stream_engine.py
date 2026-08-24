@@ -17,29 +17,78 @@ from shared.utils.sse_helper import AnthropicSSEFormatter
 
 
 def safe_parse_json(json_str: str | None) -> Any:
-    """Parse JSON string robustly, handling unescaped control characters and truncated JSON."""
+    """Parse JSON string robustly, handling unescaped control characters, Python literals, single quotes, and truncated JSON."""
     if not json_str or not isinstance(json_str, str):
         return None
     stripped = json_str.strip()
     if not stripped:
         return None
 
+    # 1. Fast path: standard json.loads
     try:
         return json.loads(stripped, strict=False)
     except Exception:
         pass
 
+    # 2. Fix line endings
     try:
         fixed = stripped.replace("\r\n", "\n").replace("\r", "\n")
         return json.loads(fixed, strict=False)
     except Exception:
         pass
 
+    # 3. Auto-close truncated stream tags/quotes
+    from atomic.parsers.auto_close_tag import AutoCloseTagParser
+    repaired = AutoCloseTagParser.repair_truncated_stream(stripped)
+
+    # Convert single quotes to double quotes if valid Python dict repr
+    if "'" in repaired:
+        if '"' not in repaired:
+            repaired = repaired.replace("'", '"')
+        else:
+            repaired = re.sub(r"'([a-zA-Z0-9_]+)'\s*:", r'"\1":', repaired)
+            repaired = re.sub(r":\s*'([^']*)'", r': "\1"', repaired)
+
+    # Fix Python boolean/None literals: True/False/None -> true/false/null
+    repaired = re.sub(r"\bTrue\b", "true", repaired)
+    repaired = re.sub(r"\bFalse\b", "false", repaired)
+    repaired = re.sub(r"\bNone\b", "null", repaired)
+
+    # Remove trailing commas
+    repaired = re.sub(r",\s*\}", "}", repaired)
+    repaired = re.sub(r",\s*\]", "]", repaired)
+
+    try:
+        return json.loads(repaired, strict=False)
+    except Exception:
+        pass
+
+    # Append missing closing quotes and braces
     for suffix in ['"', '}', '}"', '}}', '"}}', '}]}', '"}]}']:
         try:
-            return json.loads(stripped + suffix, strict=False)
+            return json.loads(repaired + suffix, strict=False)
         except Exception:
             pass
+
+    # Fallback regex key-value extraction for JSON objects
+    extracted: dict[str, Any] = {}
+    pattern = r'["\']([a-zA-Z0-9_]+)["\']\s*:\s*(["\'](?:[^"\'\\]|\\.)*["\']|true|false|null|\d+(?:\.\d+)?|\[.*?\]|\{.*?\})'
+    matches = re.findall(pattern, stripped, re.DOTALL)
+    if matches:
+        for k, v in matches:
+            v_str = v.strip('\'"')
+            if v_str.lower() == "true":
+                extracted[k] = True
+            elif v_str.lower() == "false":
+                extracted[k] = False
+            elif v_str.lower() == "null":
+                extracted[k] = None
+            else:
+                try:
+                    extracted[k] = json.loads(v)
+                except Exception:
+                    extracted[k] = v_str
+        return extracted
 
     return None
 
@@ -632,7 +681,7 @@ class StreamEngine:
             fallback_text = full_think_text if full_think_text else " "
             if "```" in fallback_text or "{" in fallback_text:
                 from core.interceptor.json_repair import JSONRepairNormalizer
-                fallback_text = await JSONRepairNormalizer.process_text(fallback_text)
+                fallback_text = await JSONRepairNormalizer.process_text(fallback_text, is_stop_hook=self.is_stop_hook)
 
             idx = self._next_block_index()
             yield AnthropicSSEFormatter.text_start(idx)
@@ -646,7 +695,7 @@ class StreamEngine:
             full_stop_text = "".join(self.accumulated_text).strip()
             if full_stop_text:
                 from core.interceptor.json_repair import JSONRepairNormalizer
-                normalized_stop_text = await JSONRepairNormalizer.process_text(full_stop_text)
+                normalized_stop_text = await JSONRepairNormalizer.process_text(full_stop_text, is_stop_hook=True)
                 self.accumulated_text = [normalized_stop_text]
 
         self.final_stop_reason = stop_reason

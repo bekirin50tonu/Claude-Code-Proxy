@@ -21,6 +21,7 @@ class JSONRepairNormalizer:
         "stop_hook",
         "stop_hook_active",
         "session summary",
+        "session_summary",
         "session_memory",
         "save_session_summary",
         "exit_session",
@@ -289,12 +290,25 @@ class JSONRepairNormalizer:
         return DeDuplicator.deduplicate(content_list)
 
     @classmethod
-    async def process_text(cls, text: str) -> str:
+    async def process_text(cls, text: str, is_stop_hook: bool | None = None) -> str:
         """Complete pipeline: sanitize markdown -> repair JSON -> normalize schema -> serialize."""
+        if not text or not isinstance(text, str):
+            return text
+
+        if is_stop_hook is None:
+            is_stop_hook = any(kw in text.lower() for kw in cls.TARGET_KEYWORDS)
+
         sanitized = await cls.sanitize_markdown_json(text)
         repaired_data = await cls.heuristic_repair_json(sanitized)
-        normalized_dict = await cls.normalize_stop_hook_schema(repaired_data)
-        return json.dumps(normalized_dict, ensure_ascii=False)
+
+        if is_stop_hook:
+            normalized_dict = await cls.normalize_stop_hook_schema(repaired_data)
+            return json.dumps(normalized_dict, ensure_ascii=False)
+
+        if isinstance(repaired_data, (dict, list)):
+            return json.dumps(repaired_data, ensure_ascii=False)
+
+        return text
 
     @classmethod
     async def process_response_dict(cls, data: dict[str, Any], subagents_enabled: bool | None = None) -> dict[str, Any]:
@@ -317,8 +331,11 @@ class JSONRepairNormalizer:
                 if isinstance(block, dict):
                     if block.get("type") == "text" and "text" in block:
                         raw_text = block["text"]
-                        if "```" in raw_text or "{" in raw_text or any(kw in raw_text.lower() for kw in cls.TARGET_KEYWORDS):
-                            block["text"] = await cls.process_text(raw_text)
+                        is_sh = any(kw in raw_text.lower() for kw in cls.TARGET_KEYWORDS)
+                        if is_sh:
+                            block["text"] = await cls.process_text(raw_text, is_stop_hook=True)
+                        elif "```json" in raw_text.lower():
+                            block["text"] = await cls.process_text(raw_text, is_stop_hook=False)
                     elif block.get("type") == "tool_use":
                         tname = block.get("name", "")
                         if "input" in block and isinstance(block["input"], dict):
