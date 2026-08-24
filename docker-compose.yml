@@ -9,4 +9,16 @@ services:
     volumes:
       - ./.env:/app/.env
       - ./agent_workspace:/app/agent_workspace
+    secrets:
+      - nvidia_nim_api_key
+      - openrouter_api_key
+      - gateway_auth_token
     restart: unless-stopped
+
+secrets:
+  nvidia_nim_api_key:
+    file: ./.env
+  openrouter_api_key:
+    file: ./.env
+  gateway_auth_token:
+    file: ./.env

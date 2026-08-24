@@ -281,8 +281,21 @@ class ModelRegistry:
         self._load()
 
 
+def _get_secret_or_env(key: str, default: str = "") -> str:
+    """Read secret from /run/secrets/<key.lower()> if available, else fallback to os.getenv."""
+    secret_file = Path("/run/secrets") / key.lower()
+    if secret_file.exists() and secret_file.is_file():
+        try:
+            return secret_file.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+    return os.getenv(key, default)
+
+
 def get_bool(key: str, default: bool = False) -> bool:
-    val = os.getenv(key)
+    val = _get_secret_or_env(key, "") if os.getenv(key) is None else os.getenv(key)
+    if val == "":
+        val = os.getenv(key)
     if val is None:
         return default
     return val.lower() in ("true", "1", "t", "y", "yes")
@@ -447,19 +460,19 @@ PROVIDER_DEFAULTS: dict[str, dict[str, int]] = {
 
 
 class Settings:
-    # Upstream API keys and endpoints
-    NVIDIA_NIM_API_KEYS: str = os.getenv("NVIDIA_NIM_API_KEYS", "")
-    NVIDIA_NIM_API_KEY: str = os.getenv("NVIDIA_NIM_API_KEY", "")
+    # Upstream API keys and endpoints (supporting Docker Secrets at /run/secrets/)
+    NVIDIA_NIM_API_KEYS: str = _get_secret_or_env("NVIDIA_NIM_API_KEYS", "")
+    NVIDIA_NIM_API_KEY: str = _get_secret_or_env("NVIDIA_NIM_API_KEY", "")
 
-    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
-    GATEWAY_AUTH_TOKEN: str = os.getenv("GATEWAY_AUTH_TOKEN", "")
-    MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
-    CEREBRAS_API_KEY: str = os.getenv("CEREBRAS_API_KEY", "")
-    FIREWORKS_API_KEY: str = os.getenv("FIREWORKS_API_KEY", "")
-    KIMI_API_KEY: str = os.getenv("KIMI_API_KEY", "")
+    OPENROUTER_API_KEY: str = _get_secret_or_env("OPENROUTER_API_KEY", "")
+    GATEWAY_AUTH_TOKEN: str = _get_secret_or_env("GATEWAY_AUTH_TOKEN", "")
+    MISTRAL_API_KEY: str = _get_secret_or_env("MISTRAL_API_KEY", "")
+    GEMINI_API_KEY: str = _get_secret_or_env("GEMINI_API_KEY", "")
+    GROQ_API_KEY: str = _get_secret_or_env("GROQ_API_KEY", "")
+    DEEPSEEK_API_KEY: str = _get_secret_or_env("DEEPSEEK_API_KEY", "")
+    CEREBRAS_API_KEY: str = _get_secret_or_env("CEREBRAS_API_KEY", "")
+    FIREWORKS_API_KEY: str = _get_secret_or_env("FIREWORKS_API_KEY", "")
+    KIMI_API_KEY: str = _get_secret_or_env("KIMI_API_KEY", "")
 
     # Base URLs / Proxies
     NVIDIA_NIM_BASE_URL: str = os.getenv(
@@ -595,17 +608,17 @@ class Settings:
         else:
             load_dotenv(override=True)
 
-        self.NVIDIA_NIM_API_KEYS = os.getenv("NVIDIA_NIM_API_KEYS", "")
-        self.NVIDIA_NIM_API_KEY = os.getenv("NVIDIA_NIM_API_KEY", "")
-        self.OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-        self.GATEWAY_AUTH_TOKEN = os.getenv("GATEWAY_AUTH_TOKEN", "")
-        self.MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
-        self.GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-        self.GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-        self.DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-        self.CEREBRAS_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
-        self.FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY", "")
-        self.KIMI_API_KEY = os.getenv("KIMI_API_KEY", "")
+        self.NVIDIA_NIM_API_KEYS = _get_secret_or_env("NVIDIA_NIM_API_KEYS", "")
+        self.NVIDIA_NIM_API_KEY = _get_secret_or_env("NVIDIA_NIM_API_KEY", "")
+        self.OPENROUTER_API_KEY = _get_secret_or_env("OPENROUTER_API_KEY", "")
+        self.GATEWAY_AUTH_TOKEN = _get_secret_or_env("GATEWAY_AUTH_TOKEN", "")
+        self.MISTRAL_API_KEY = _get_secret_or_env("MISTRAL_API_KEY", "")
+        self.GEMINI_API_KEY = _get_secret_or_env("GEMINI_API_KEY", "")
+        self.GROQ_API_KEY = _get_secret_or_env("GROQ_API_KEY", "")
+        self.DEEPSEEK_API_KEY = _get_secret_or_env("DEEPSEEK_API_KEY", "")
+        self.CEREBRAS_API_KEY = _get_secret_or_env("CEREBRAS_API_KEY", "")
+        self.FIREWORKS_API_KEY = _get_secret_or_env("FIREWORKS_API_KEY", "")
+        self.KIMI_API_KEY = _get_secret_or_env("KIMI_API_KEY", "")
 
         self.NVIDIA_NIM_BASE_URL = os.getenv(
             "NVIDIA_NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"
@@ -908,6 +921,61 @@ class ProxyStats:
         }
 
 
+
+class ClaudeSettingsManager:
+    """Manages automatic synchronization of global and local .claude/settings.json configuration files."""
+
+    @classmethod
+    def sync_settings(cls, port: int = 8090, auth_token: str | None = None) -> list[Path]:
+        """
+        Synchronize ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN into:
+        1. Global ~/.claude/settings.json
+        2. Project local .claude/settings.json (if directory exists or cwd)
+        """
+        proxy_url = f"http://localhost:{port}"
+        token = auth_token or os.getenv("GATEWAY_AUTH_TOKEN", "custom-proxy-token")
+
+        targets: list[Path] = [
+            Path.home() / ".claude" / "settings.json",
+            Path.cwd() / ".claude" / "settings.json",
+        ]
+
+        updated_paths: list[Path] = []
+
+        for target in targets:
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                current_data: dict[str, Any] = {}
+                if target.exists():
+                    try:
+                        content = target.read_text(encoding="utf-8").strip()
+                        if content:
+                            current_data = json.loads(content)
+                    except Exception as pe:
+                        logger.warning("Failed to parse existing settings at {}: {}", target, pe)
+                        current_data = {}
+
+                if not isinstance(current_data, dict):
+                    current_data = {}
+
+                env_block = current_data.get("env")
+                if not isinstance(env_block, dict):
+                    env_block = {}
+
+                env_block["ANTHROPIC_BASE_URL"] = proxy_url
+                env_block["ANTHROPIC_AUTH_TOKEN"] = token
+                current_data["env"] = env_block
+
+                target.write_text(json.dumps(current_data, indent=2, ensure_ascii=False), encoding="utf-8")
+                updated_paths.append(target)
+                logger.info("🔄 \033[1;32m[ClaudeSettingsManager]\033[0m Synced {} with ANTHROPIC_BASE_URL={}", target, proxy_url)
+            except Exception as exc:
+                logger.error("Failed to sync settings at {}: {}", target, exc)
+
+        return updated_paths
+
+
+claude_settings_manager = ClaudeSettingsManager()
 
 settings = Settings()
 stats = ProxyStats()

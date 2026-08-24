@@ -63,6 +63,23 @@ class NimThrottleGuard:
     def max_queue_wait(self) -> float:
         return self._max_queue_wait if self._max_queue_wait is not None else float(settings.NVIDIA_NIM_MAX_QUEUE_WAIT)
 
+    def set_max_queue_wait(self, val: float) -> None:
+        """Public API to dynamically configure max queue wait budget."""
+        self._max_queue_wait = float(val)
+
+    def set_rpm_limit(self, val: int) -> None:
+        """Public API to dynamically configure sliding window RPM limit."""
+        self._rpm_limit = int(val)
+
+    def get_config(self) -> dict[str, Any]:
+        """Public API to inspect active throttle guard parameters."""
+        return {
+            "rpm_limit": self.rpm_limit,
+            "window_seconds": self.window_seconds,
+            "max_queue_wait": self.max_queue_wait,
+            "max_sleep_threshold": self.max_sleep_threshold,
+        }
+
     def get_active_sleeps(self) -> list[dict[str, Any]]:
         """Return list of currently active throttle sleep events."""
         now = time.monotonic()

@@ -151,6 +151,64 @@ MCP_TOOLS_DEFINITIONS = [
             "required": ["model_id", "action"],
         },
     },
+    {
+        "name": "get_subagent_policy",
+        "description": "Retrieve active YAML-driven subagent policy configuration and tool rules.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_subagent_policy",
+        "description": "Update YAML-driven subagent policy configuration rules.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "policy": {"type": "object", "description": "Full or partial policy dictionary."}
+            },
+            "required": ["policy"],
+        },
+    },
+    {
+        "name": "get_subagent_decisions",
+        "description": "Retrieve audit trail of recent subagent policy decisions.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "manage_prompt_queue",
+        "description": "Manage pending remote Telegram / CLI prompt queue (action: 'peek', 'inject', 'replace', 'clear').",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["peek", "inject", "replace", "clear"]},
+                "session_id": {"type": "string"},
+                "prompt": {"type": "string"},
+                "index": {"type": "integer"},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "get_claude_settings",
+        "description": "Fetch merged Claude Code CLI settings across user (~/.claude.json), project (.claude.json), and local scopes.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_claude_setting",
+        "description": "Update a setting in user or project level Claude Code configuration file.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string"},
+                "value": {"description": "Setting value"},
+                "scope": {"type": "string", "enum": ["user", "project"]},
+            },
+            "required": ["key", "value"],
+        },
+    },
+    {
+        "name": "sync_proxy_to_claude",
+        "description": "Sync local project .claude.json settings so Claude Code CLI routes requests through this local proxy gateway.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -174,6 +232,57 @@ async def execute_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> dict[st
                 },
                 "fallbacks": cfg_data.get("fallbacks", {}),
             }
+            return {"content": [{"type": "text", "text": json.dumps(res, indent=2)}]}
+
+        elif tool_name == "get_subagent_policy":
+            from atomic.guards.subagent_policy import subagent_policy_engine
+            return {"content": [{"type": "text", "text": json.dumps(subagent_policy_engine.get_policy(), indent=2)}]}
+
+        elif tool_name == "set_subagent_policy":
+            from atomic.guards.subagent_policy import subagent_policy_engine
+            policy = arguments.get("policy", {})
+            subagent_policy_engine.save_policy(policy)
+            return {"content": [{"type": "text", "text": json.dumps({"status": "success", "policy": subagent_policy_engine.get_policy()}, indent=2)}]}
+
+        elif tool_name == "get_subagent_decisions":
+            from atomic.guards.subagent_policy import subagent_policy_engine
+            return {"content": [{"type": "text", "text": json.dumps(subagent_policy_engine.get_decisions(), indent=2)}]}
+
+        elif tool_name == "manage_prompt_queue":
+            from core.interceptor.prompt_queue import prompt_queue_manager
+            action = arguments.get("action", "")
+            sid = arguments.get("session_id", "default_session")
+            p_str = arguments.get("prompt", "")
+            idx = arguments.get("index", 0)
+
+            if action == "peek":
+                res = prompt_queue_manager.peek_prompts(sid)
+            elif action == "inject":
+                res = await prompt_queue_manager.inject_prompt_at(p_str, idx, sid)
+            elif action == "replace":
+                res = await prompt_queue_manager.replace_prompt(idx, p_str, sid)
+            elif action == "clear":
+                res = prompt_queue_manager.clear_queue(sid)
+            else:
+                res = "Invalid action"
+            return {"content": [{"type": "text", "text": json.dumps({"status": "success", "result": res}, indent=2)}]}
+
+        elif tool_name == "get_claude_settings":
+            from api.settings_manager import claude_settings_manager
+            res = claude_settings_manager.get_merged_settings()
+            return {"content": [{"type": "text", "text": json.dumps(res, indent=2)}]}
+
+        elif tool_name == "set_claude_setting":
+            from api.settings_manager import claude_settings_manager
+            k = arguments.get("key", "")
+            v = arguments.get("value")
+            sc = arguments.get("scope", "project")
+            success = claude_settings_manager.set_setting(k, v, scope=sc)
+            return {"content": [{"type": "text", "text": json.dumps({"status": "success" if success else "error", "key": k, "value": v, "scope": sc}, indent=2)}]}
+
+        elif tool_name == "sync_proxy_to_claude":
+            from api.settings_manager import claude_settings_manager
+            res = claude_settings_manager.sync_proxy_to_claude()
             return {"content": [{"type": "text", "text": json.dumps(res, indent=2)}]}
 
         elif tool_name == "set_model_mapping":
@@ -256,11 +365,11 @@ async def execute_mcp_tool(tool_name: str, arguments: dict[str, Any]) -> dict[st
                 updated_fields["max_sleep_threshold"] = nim_throttle_guard.max_sleep_threshold
 
             if max_queue is not None and isinstance(max_queue, (int, float)):
-                nim_throttle_guard._max_queue_wait = float(max_queue)
+                nim_throttle_guard.set_max_queue_wait(max_queue)
                 updated_fields["max_queue_wait"] = nim_throttle_guard.max_queue_wait
 
             if rpm is not None and isinstance(rpm, int):
-                nim_throttle_guard._rpm_limit = rpm
+                nim_throttle_guard.set_rpm_limit(rpm)
                 updated_fields["rpm_limit"] = nim_throttle_guard.rpm_limit
                 from api.dashboard import ConfigSaveRequest
                 await save_config(ConfigSaveRequest(configs={"PROVIDER_NVIDIA_NIM_RPM": rpm}))
