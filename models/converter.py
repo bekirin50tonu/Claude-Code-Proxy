@@ -155,8 +155,9 @@ class ModelConverter:
                                 "content": compressed_content,
                             }
                         )
-                else:
-                    openai_msgs.append({"role": "user", "content": "\n".join(text_parts)})
+                user_text = "\n".join(text_parts).strip()
+                if user_text:
+                    openai_msgs.append({"role": "user", "content": user_text})
 
         return openai_msgs
 

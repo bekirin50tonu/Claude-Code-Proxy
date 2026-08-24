@@ -569,8 +569,8 @@ class StreamEngine:
                             self.current_block_type = "text"
 
                         self.accumulated_text.append(remaining_text)
-                        if remaining_text.strip() or remaining_text == " ":
-                            self.text_or_tool_emitted = True
+                        self.text_or_tool_emitted = True
+                        if remaining_text.strip():
                             import asyncio
 
                             from bot.live_bridge import live_bridge_manager
