@@ -4,15 +4,40 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from loguru import logger
 from pydantic import BaseModel
 
+from api.websocket_manager import ws_manager
 from config import model_registry, settings, stats
 from core.router.selector import model_selector as model_router
 
 router = APIRouter()
+
+
+@router.websocket("/ws/dashboard")
+async def dashboard_websocket_endpoint(websocket: WebSocket) -> None:
+    """Real-time WebSocket endpoint on the same IP and port for live telemetry streaming and dashboard event updates."""
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            data_text = await websocket.receive_text()
+            try:
+                msg = json.loads(data_text)
+                action = msg.get("action")
+                if action == "ping":
+                    await websocket.send_text(json.dumps({"event": "pong"}))
+                elif action == "refresh":
+                    snapshot = await ws_manager._build_initial_snapshot()
+                    await websocket.send_text(json.dumps({"event": "telemetry_pulse", "data": snapshot}))
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        await ws_manager.disconnect(websocket)
+    except Exception as exc:
+        logger.debug("WebSocket connection error: {}", exc)
+        await ws_manager.disconnect(websocket)
 
 # Fallback models loaded dynamically from models.yaml via model_registry
 def get_fallback_models() -> dict[str, list[str]]:
@@ -404,6 +429,8 @@ async def save_config(req: ConfigSaveRequest) -> JSONResponse:
         settings.reload()
         model_registry.reload()
 
+        await ws_manager.broadcast_event("config_updated", {"message": "Configuration saved & reloaded"})
+
         return JSONResponse(
             content={
                 "status": "success",
@@ -429,6 +456,7 @@ async def toggle_subagents_setting(req: SubagentsToggleRequest) -> JSONResponse:
     global SUBAGENTS_ENABLED
     SUBAGENTS_ENABLED = bool(req.enabled)
     logger.info("Subagents Emergency Switch updated: SUBAGENTS_ENABLED={}", SUBAGENTS_ENABLED)
+    await ws_manager.broadcast_event("subagents_updated", {"subagents_enabled": SUBAGENTS_ENABLED})
     return JSONResponse(
         content={
             "status": "success",
@@ -436,7 +464,6 @@ async def toggle_subagents_setting(req: SubagentsToggleRequest) -> JSONResponse:
             "message": f"Subagent execution is now {'ENABLED (ON)' if SUBAGENTS_ENABLED else 'DISABLED (OFF Bypass)'}.",
         }
     )
-
 
 
 @router.get("/api/stats")
@@ -494,6 +521,7 @@ async def handle_circuit_breaker_action(req: CircuitBreakerActionRequest) -> JSO
     if action_lower in ("reset", "open_traffic", "enable", "clear", "open"):
         # User requested to clear timeout & reset circuit breaker to working/CLOSED state
         await cb.reset()
+        await ws_manager.broadcast_event("circuit_breaker_changed", {"model_id": req.model_id, "action": "reset", "status": cb.status_dict()})
         return JSONResponse(
             content={
                 "status": "success",
@@ -505,6 +533,7 @@ async def handle_circuit_breaker_action(req: CircuitBreakerActionRequest) -> JSO
         # User requested to block model / force circuit breaker to OPEN state (extending timeout 1m -> 5m -> 10m -> 15m -> 30m -> 60m)
         new_timeout = await cb.trip_or_extend(reason="Manually blocked via Dashboard")
         mins = int(new_timeout // 60)
+        await ws_manager.broadcast_event("circuit_breaker_changed", {"model_id": req.model_id, "action": "trip", "status": cb.status_dict()})
         return JSONResponse(
             content={
                 "status": "success",

@@ -130,60 +130,113 @@ function switchOsTab(osId) {
     }
 }
 
-function startLiveAutoRefresh() {
-    if (liveRefreshTimer) clearInterval(liveRefreshTimer);
-    
-    let intervalSec = 4;
+let dashboardSocket = null;
+let wsReconnectTimer = null;
+
+function initDashboardWebSocket() {
+    if (dashboardSocket) {
+        try { dashboardSocket.close(); } catch(e){}
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/dashboard`;
+
+    updateWsBadge('connecting');
+
     try {
-        const savedRate = localStorage.getItem('dashboard_refresh_rate');
-        if (savedRate !== null && !isNaN(parseInt(savedRate))) {
-            intervalSec = parseInt(savedRate);
-        } else if (configSnapshot["REFRESH_TIME"] !== undefined) {
-            intervalSec = parseInt(configSnapshot["REFRESH_TIME"]);
-        }
-    } catch(e) {
-        if (configSnapshot["REFRESH_TIME"] !== undefined) {
-            intervalSec = parseInt(configSnapshot["REFRESH_TIME"]);
-        }
+        dashboardSocket = new WebSocket(wsUrl);
+
+        dashboardSocket.onopen = () => {
+            console.log('🌐 Dashboard WebSocket connected:', wsUrl);
+            updateWsBadge('connected');
+            if (wsReconnectTimer) {
+                clearTimeout(wsReconnectTimer);
+                wsReconnectTimer = null;
+            }
+        };
+
+        dashboardSocket.onmessage = (event) => {
+            try {
+                const payload = JSON.parse(event.data);
+                handleWsEvent(payload);
+            } catch (e) {
+                console.error('Error parsing WS message:', e);
+            }
+        };
+
+        dashboardSocket.onclose = (event) => {
+            console.warn('🔌 Dashboard WebSocket disconnected:', event.reason);
+            updateWsBadge('disconnected');
+            scheduleWsReconnect();
+        };
+
+        dashboardSocket.onerror = (err) => {
+            console.error('WebSocket error:', err);
+            updateWsBadge('disconnected');
+        };
+    } catch (e) {
+        console.error('Failed to create WebSocket:', e);
+        updateWsBadge('disconnected');
+        scheduleWsReconnect();
     }
-    
-    const headerSel = document.getElementById('header-refresh-select');
-    if (headerSel) headerSel.value = String(intervalSec);
-    const inputEl = document.getElementById('REFRESH_TIME');
-    if (inputEl) inputEl.value = intervalSec;
+}
 
-    if (isNaN(intervalSec) || intervalSec <= 0) {
-        currentRefreshIntervalSeconds = 0;
-        return;
+function updateWsBadge(status) {
+    const badge = document.getElementById('ws-status-badge');
+    if (!badge) return;
+
+    if (status === 'connected') {
+        badge.style.background = 'rgba(34, 197, 94, 0.15)';
+        badge.style.borderColor = '#22c55e';
+        badge.style.color = '#4ade80';
+        badge.innerHTML = '<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e;"></span> LIVE WS';
+    } else if (status === 'connecting') {
+        badge.style.background = 'rgba(234, 179, 8, 0.15)';
+        badge.style.borderColor = '#eab308';
+        badge.style.color = '#fef08a';
+        badge.innerHTML = '<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #eab308;"></span> CONNECTING...';
+    } else {
+        badge.style.background = 'rgba(239, 68, 68, 0.15)';
+        badge.style.borderColor = '#f87171';
+        badge.style.color = '#fca5a5';
+        badge.innerHTML = '<span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #f87171;"></span> RECONNECTING';
     }
+}
 
-    currentRefreshIntervalSeconds = intervalSec;
-    const ms = currentRefreshIntervalSeconds * 1000;
+function scheduleWsReconnect() {
+    if (wsReconnectTimer) return;
+    wsReconnectTimer = setTimeout(() => {
+        wsReconnectTimer = null;
+        initDashboardWebSocket();
+    }, 3000);
+}
 
-    pollTelemetry();
-    fetchRouterStatus();
+function handleWsEvent(payload) {
+    const event = payload.event;
+    const data = payload.data;
 
-    liveRefreshTimer = setInterval(() => {
+    if (event === 'initial_state' || event === 'telemetry_pulse') {
         pollTelemetry();
         fetchRouterStatus();
-    }, ms);
+    } else if (event === 'request_captured') {
+        pollTelemetry();
+        const devPane = document.getElementById('pane-dev');
+        if (devPane && devPane.classList.contains('active')) {
+            fetchDevPayloads();
+        }
+    } else if (event === 'circuit_breaker_changed' || event === 'router_status_update') {
+        fetchRouterStatus();
+    } else if (event === 'config_updated') {
+        loadConfigs();
+    }
+}
+
+function startLiveAutoRefresh() {
+    initDashboardWebSocket();
 }
 
 function onHeaderRefreshRateChange(val) {
-    const sec = parseInt(val);
-    configSnapshot["REFRESH_TIME"] = sec;
-    try {
-        localStorage.setItem('dashboard_refresh_rate', sec);
-    } catch(e) {}
-    const inputEl = document.getElementById('REFRESH_TIME');
-    if (inputEl) inputEl.value = sec;
-    
-    startLiveAutoRefresh();
-    if (sec > 0) {
-        showToast(`Live auto-refresh rate set to ${sec}s`, 'success');
-    } else {
-        showToast('Live auto-refresh paused', 'warning');
-    }
+    initDashboardWebSocket();
 }
 
 async function revertConfigs() {
@@ -1774,7 +1827,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchModels();
     loadConfigs();
     pollTelemetry();
-    setInterval(pollTelemetry, 3000);
+    initDashboardWebSocket();
 });
 
 // Provider default preset configs (including RPM, TPM, Concurrency, and Timeouts)

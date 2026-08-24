@@ -867,6 +867,18 @@ class ProxyStats:
         except Exception as dev_err:
             logger.warning("Failed to write dev logs: %s", dev_err)
 
+        # Broadcast real-time WebSocket event to active dashboard clients
+        try:
+            from api.websocket_manager import ws_manager
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(ws_manager.broadcast_event("request_captured", entry.to_dict(include_payload=True)))
+            except RuntimeError:
+                pass
+        except Exception:
+            pass
+
 
     def get_recent_dicts(self, include_payload: bool = True) -> list[dict[str, Any]]:
         return [entry.to_dict(include_payload=include_payload) for entry in self.recent_requests]

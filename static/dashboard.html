@@ -16,15 +16,10 @@
         </div>
         <div class="header-links">
             <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 0.65rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">LIVE REFRESH:</span>
-                <select id="header-refresh-select" onchange="onHeaderRefreshRateChange(this.value)" style="background: #050608; border: 1px solid var(--border-subtle); color: #ffffff; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; outline: none; cursor: pointer; transition: border 0.2s;">
-                    <option value="1">1s (Ultra Fast)</option>
-                    <option value="2">2s (Fast)</option>
-                    <option value="4" selected>4s (Default)</option>
-                    <option value="10">10s (Relaxed)</option>
-                    <option value="30">30s (Slow)</option>
-                    <option value="0">Off (Manual)</option>
-                </select>
+                <span style="font-size: 0.65rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px;">WEBSOCKET REALTIME:</span>
+                <span id="ws-status-badge" style="background: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; color: #4ade80; padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 800; display: flex; align-items: center; gap: 5px;">
+                    <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e;"></span> CONNECTING...
+                </span>
             </div>
             <a href="/docs" target="_blank" class="header-link">Docs</a>
         </div>

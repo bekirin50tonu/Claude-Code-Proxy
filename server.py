@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown lifecycles."""
     import os
     import signal
-    from config import model_registry, settings
+    from config import model_registry, settings, stats
 
     logger.info("Initializing Claude Code Proxy Server...")
 
