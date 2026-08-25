@@ -98,7 +98,7 @@ def test_gateway_nim_queue_timeout_triggers_openrouter_fallback():
     mock_provider = AsyncMock()
 
     async def mock_complete(model, **kwargs):
-        if model.startswith("nvidia_nim/"):
+        if "open_router" not in model:
             raise NimQueueTimeoutError(model_name=model, waited_seconds=30.0, max_queue_wait=30.0)
         return (
             {
@@ -123,13 +123,14 @@ def test_gateway_nim_queue_timeout_triggers_openrouter_fallback():
     with (
         patch("core.gateway._get_provider", return_value=mock_provider),
         patch("core.gateway._check_auth", return_value=True),
-        patch("core.router.selector.model_selector._is_available", new=AsyncMock(return_value=True)),
+        patch("core.gateway.fallback_loop.model_selector._is_available", new=AsyncMock(return_value=True)),
         patch("config.model_registry.get_fallbacks", return_value=["open_router/meta-llama/llama-3.3-70b-instruct:free"]),
+        patch("core.gateway.model_select.model_registry.get_fallbacks", return_value=["open_router/meta-llama/llama-3.3-70b-instruct:free"]),
     ):
         response = client.post("/v1/messages", json=payload)
 
     assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
     body = response.json()
+    print("Mock calls:", mock_provider.complete.call_args_list)
     assert body["content"][0]["text"] == "Hello from OpenRouter fallback!"
-    # Verify complete was called twice: once for nvidia_nim (which timed out) and once for open_router fallback
     assert mock_provider.complete.call_count == 2

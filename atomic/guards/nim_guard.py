@@ -110,28 +110,15 @@ class NimThrottleGuard:
         timeout_budget = custom_max_queue_wait if custom_max_queue_wait is not None else self.max_queue_wait
 
         # Phase 1: Single-Lane Concurrency Guard
-        remaining = max(0.1, timeout_budget - (time.monotonic() - start_time))
+        remaining = max(0.001, timeout_budget - (time.monotonic() - start_time))
         try:
             await asyncio.wait_for(self._concurrency_lock.acquire(), timeout=remaining)
         except (asyncio.TimeoutError, TimeoutError):
-            if self._concurrency_lock.locked():
-                logger.warning("NVIDIA NIM concurrency lock appeared stuck for '%s'. Self-healing lock.", model_name)
-                with contextlib.suppress(RuntimeError):
-                    self._concurrency_lock.release()
-                try:
-                    await asyncio.wait_for(self._concurrency_lock.acquire(), timeout=1.0)
-                except Exception:
-                    raise NimQueueTimeoutError(
-                        model_name=model_name,
-                        waited_seconds=round(time.monotonic() - start_time, 2),
-                        max_queue_wait=timeout_budget,
-                    )
-            else:
-                raise NimQueueTimeoutError(
-                    model_name=model_name,
-                    waited_seconds=round(time.monotonic() - start_time, 2),
-                    max_queue_wait=timeout_budget,
-                )
+            raise NimQueueTimeoutError(
+                model_name=model_name,
+                waited_seconds=round(time.monotonic() - start_time, 2),
+                max_queue_wait=timeout_budget,
+            )
 
         try:
             # Phase 2: Sliding Window Throttling (38 RPM / 60s)

@@ -44,36 +44,25 @@ class JSONRepairNormalizer:
 
     @classmethod
     def is_stop_hook_target(cls, payload: dict[str, Any] | None) -> bool:
-        """Detect if request payload is specifically a Stop Hook execution request."""
+        """Detect if request payload involves a Stop Hook or Goal Evaluator execution request."""
         if not payload or not isinstance(payload, dict):
             return False
 
         # 1. Inspect tools definition
         tools = payload.get("tools")
-        if isinstance(tools, list) and len(tools) > 0:
+        has_stop_hook_tool = False
+        has_coding_tools = False
+        if isinstance(tools, list):
             coding_tool_names = {"bash", "read", "write", "edit", "glob", "grep", "notebookcell", "task"}
-            has_coding_tools = False
-            for t in tools:
-                if isinstance(t, dict):
-                    t_name = str(t.get("name", "")).lower()
-                    if t_name in coding_tool_names or any(c in t_name for c in ("bash", "read", "write", "edit")):
-                        has_coding_tools = True
-                        break
-            if has_coding_tools:
-                return False
-
-            has_stop_hook_tool = False
             for t in tools:
                 if isinstance(t, dict):
                     name = str(t.get("name", "")).lower()
-                    if any(kw in name for kw in ("exit_session", "stop_hook", "save_session_summary")):
+                    if name in coding_tool_names or any(c in name for c in ("bash", "read", "write", "edit")):
+                        has_coding_tools = True
+                    if any(kw in name for kw in ("exit_session", "stop_hook", "save_session_summary", "evaluator", "goal")):
                         has_stop_hook_tool = True
-                        break
-            if not has_stop_hook_tool:
-                return False
-            return True
 
-        # 2. Inspect last user message & system prompt
+        # 2. Inspect user messages and system prompt
         messages = payload.get("messages", [])
         last_user_content = ""
         if isinstance(messages, list):
@@ -88,22 +77,9 @@ class JSONRepairNormalizer:
                         )
                     break
 
-        system_content = ""
-        system = payload.get("system")
-        if isinstance(system, str):
-            system_content = system
-        elif isinstance(system, list):
-            system_content = " ".join(
-                str(b.get("text", "")) for b in system if isinstance(b, dict) and b.get("type") == "text"
-            )
-
         user_text_lower = last_user_content.lower()
 
-        # Exclude CLI goal notice ("a session-scoped stop hook is now active")
-        if "a session-scoped stop hook is now active" in user_text_lower:
-            return False
-
-        stop_hook_specific_patterns = (
+        stop_hook_patterns = (
             "stop_hook",
             "stop hook",
             "stop_hook_active",
@@ -111,8 +87,16 @@ class JSONRepairNormalizer:
             "exit_session",
             "session_summary",
             "return the stop hook",
+            "a session-scoped stop hook is now active",
+            "goal evaluator",
+            "evaluate goal",
         )
-        return any(pat in user_text_lower for pat in stop_hook_specific_patterns)
+        has_user_stop_hook_msg = any(pat in user_text_lower for pat in stop_hook_patterns)
+
+        if has_coding_tools:
+            return has_user_stop_hook_msg
+
+        return has_stop_hook_tool or has_user_stop_hook_msg
 
     @classmethod
     def fix_angle_brackets(cls, text: str) -> str:
@@ -246,8 +230,10 @@ class JSONRepairNormalizer:
         if isinstance(data, dict):
             # Check if this is a Stop Hook Evaluator response schema {"ok": bool, "reason": str}
             if "ok" in data:
+                raw_ok = data["ok"]
+                ok_bool = True if str(raw_ok).lower() in ("true", "1", "yes") else False
                 return {
-                    "ok": bool(data["ok"]),
+                    "ok": ok_bool,
                     "reason": str(data.get("reason", "")),
                     "impossible": bool(data.get("impossible", False)) if "impossible" in data else False,
                 }
@@ -302,12 +288,14 @@ class JSONRepairNormalizer:
         sanitized = await cls.sanitize_markdown_json(text)
         repaired_data = await cls.heuristic_repair_json(sanitized)
 
-        if is_stop_hook:
+        is_evaluator_or_stop_hook = is_stop_hook
+        if isinstance(repaired_data, dict):
+            if "ok" in repaired_data or any(k.lower() in ("summary", "memory", "memories", "session_summary", "stop_hook_active", "should_stop") for k in repaired_data):
+                is_evaluator_or_stop_hook = True
+
+        if is_evaluator_or_stop_hook and isinstance(repaired_data, (dict, str, list)):
             normalized_dict = await cls.normalize_stop_hook_schema(repaired_data)
             return json.dumps(normalized_dict, ensure_ascii=False)
-
-        if isinstance(repaired_data, (dict, list)):
-            return json.dumps(repaired_data, ensure_ascii=False)
 
         return text
 
