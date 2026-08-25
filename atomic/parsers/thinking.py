@@ -80,10 +80,13 @@ class ThinkingParser(BaseAtomicParser):
 
         while self.buffer:
             if not self.in_think_tag:
-                match = re.search(r"<(think|thought)>", self.buffer, re.IGNORECASE)
+                match = re.search(r"<(think|thought|thinking)>", self.buffer, re.IGNORECASE)
                 if match:
                     think_start = match.start()
                     think_end_tag = match.end()
+                    if think_start > 0:
+                        text_before = self.buffer[:think_start]
+                        clean_text_parts.append(text_before)
                     idx = self._ensure_block("thinking", events)
                     self.in_think_tag = True
                     self.buffer = self.buffer[think_end_tag:]
@@ -94,6 +97,7 @@ class ThinkingParser(BaseAtomicParser):
                     [
                         "<think>".startswith(self.buffer[partial_idx:].lower()),
                         "<thought>".startswith(self.buffer[partial_idx:].lower()),
+                        "<thinking>".startswith(self.buffer[partial_idx:].lower()),
                     ]
                 ):
                     text_to_flush = self.buffer[:partial_idx]
@@ -109,7 +113,7 @@ class ThinkingParser(BaseAtomicParser):
                 break
 
             else:
-                match = re.search(r"</(think|thought)>", self.buffer, re.IGNORECASE)
+                match = re.search(r"</(think|thought|thinking)>", self.buffer, re.IGNORECASE)
                 if match:
                     think_end_start = match.start()
                     think_end_finish = match.end()
@@ -128,6 +132,7 @@ class ThinkingParser(BaseAtomicParser):
                     [
                         "</think>".startswith(self.buffer[partial_idx:].lower()),
                         "</thought>".startswith(self.buffer[partial_idx:].lower()),
+                        "</thinking>".startswith(self.buffer[partial_idx:].lower()),
                     ]
                 ):
                     thinking_to_flush = self.buffer[:partial_idx]

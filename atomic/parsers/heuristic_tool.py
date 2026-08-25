@@ -198,8 +198,8 @@ class HeuristicToolParser(BaseAtomicParser):
             except Exception:
                 pass
 
-        # 4. Check for open unclosed tool block or partial tag at end of buffer across chunk boundaries
-        tool_openers = (r"```(?:json|JSON|bash|sh|shell|zsh)?", r"<tool_call>", r"\[TOOL_CALLS?\]", r"<(?:function|parameter)=")
+        # 4. Check for open unclosed tool block or codeblock across chunk boundaries
+        tool_openers = (r"```\s*[\w_]*", r"<tool_call>", r"\[TOOL_CALLS?\]", r"<(?:function|parameter)=", r"<<(?:function|parameter)=")
         for pattern in tool_openers:
             open_match = re.search(pattern, masked_buffer, re.IGNORECASE)
             if open_match:
@@ -211,19 +211,11 @@ class HeuristicToolParser(BaseAtomicParser):
                     events.append(ModelConverter.build_sse_block_stop(idx))
                 
                 self.text_buffer = self.unmask_code_generics(self.text_buffer[open_match.start() :])
-                from loguru import logger
-                logger.info("🔄 \033[1;34m[HeuristicToolStatefulParser]\033[0m Buffered open tool block '{}' across chunk boundary.", pattern)
                 return events, ""
 
-        # 5. Check for partial tag prefix at very end of buffer
-        partial_prefixes = ("<tool_call", "<function=", "<<function=", "<parameter=", "<<parameter=", "[TOOL_CALL", "```bash", "```json")
-        for tag in partial_prefixes:
-            for i in range(3, len(tag) + 1):
-                sub = tag[:i]
-                if self.text_buffer.endswith(sub):
-                    from loguru import logger
-                    logger.info("🔄 \033[1;34m[HeuristicToolStatefulParser]\033[0m Buffered partial tool tag '{}' across chunk boundary.", sub)
-                    return events, ""
+        # 5. Check for partial tag or fence prefix at very end of buffer across chunk boundaries
+        if re.search(r"(`{1,3}[\w_]*|<[\w_=#<]*|\[[\w_]*)$", self.text_buffer, re.IGNORECASE):
+            return events, ""
 
         # Plain text remaining in buffer
         remaining_text = self.text_buffer

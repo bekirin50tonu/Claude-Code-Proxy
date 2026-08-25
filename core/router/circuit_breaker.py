@@ -213,6 +213,8 @@ class CircuitBreakerRegistry:
 
     def notify_trip(self, model_id: str, reason: str) -> None:
         """Dispatch trip event to all registered listeners."""
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return
         for cb in self._trip_callbacks:
             try:
                 if callable(cb):

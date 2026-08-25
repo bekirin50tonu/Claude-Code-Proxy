@@ -93,6 +93,13 @@ async def root() -> dict[str, str]:
     }
 
 
+@app.head("/api/hello")
+@app.get("/api/hello")
+async def api_hello() -> dict[str, str]:
+    """Health check endpoint requested by Claude Code CLI."""
+    return {"status": "ok", "service": "claude-code-proxy"}
+
+
 @app.get("/health")
 async def health_liveness() -> dict[str, str]:
     """Liveness probe returning 200 OK if proxy server is running."""

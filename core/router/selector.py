@@ -112,13 +112,16 @@ class ModelSelector:
         """Return combined CB + RL status for dashboard telemetry."""
         cb_statuses = circuit_breaker_registry.all_statuses()
         rl_statuses = rate_limit_parser.all_statuses()
+        configured_models = model_registry.all_configured_models() if hasattr(model_registry, "all_configured_models") else []
 
-        all_ids = set(cb_statuses.keys()) | set(rl_statuses.keys())
+        all_ids = set(cb_statuses.keys()) | set(rl_statuses.keys()) | set(configured_models)
         result: dict[str, object] = {}
         for mid in sorted(all_ids):
+            if not mid:
+                continue
             result[mid] = {
-                "circuit_breaker": cb_statuses.get(mid, {"state": "closed", "failure_count": 0}),
-                "rate_limit": rl_statuses.get(mid, {"has_headroom": True}),
+                "circuit_breaker": cb_statuses.get(mid, {"state": "closed", "failure_count": 0, "last_failure_reason": "None (Operational)"}),
+                "rate_limit": rl_statuses.get(mid, {"has_headroom": True, "req_remaining": None, "tok_remaining": None}),
             }
         return result
 

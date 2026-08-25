@@ -273,6 +273,9 @@ class ModelRegistry:
                     ids.append(fb)
         return ids
 
+    def all_configured_models(self) -> list[str]:
+        return self.all_model_ids()
+
     def save_entries(self, updates: dict[str, dict[str, Any]]) -> None:
         """Update models.yaml with new primary or fallback_order definitions."""
         _ensure_models_yaml_exists()
@@ -659,11 +662,11 @@ class Settings(BaseModel):
         self.LLAMA_CPP_BASE_URL = os.getenv("LLAMA_CPP_BASE_URL", "http://localhost:8080/v1")
         self.OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-        self.MODEL_OPUS = os.getenv("MODEL_OPUS", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
-        self.MODEL_SONNET = os.getenv("MODEL_SONNET", "nvidia_nim/meta/llama-3.1-70b-instruct")
-        self.MODEL_SONNET_1M = os.getenv("MODEL_SONNET_1M", "open_router/meta-llama/llama-3.3-70b-instruct")
+        self.MODEL_OPUS = os.getenv("MODEL_OPUS", "nvidia_nim/meta/llama-3.3-70b-instruct")
+        self.MODEL_SONNET = os.getenv("MODEL_SONNET", "nvidia_nim/meta/llama-3.3-70b-instruct")
+        self.MODEL_SONNET_1M = os.getenv("MODEL_SONNET_1M", "nvidia_nim/meta/llama-3.3-70b-instruct")
         self.MODEL_HAIKU = os.getenv("MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct")
-        self.MODEL = os.getenv("MODEL", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct")
+        self.MODEL = os.getenv("MODEL", "nvidia_nim/meta/llama-3.3-70b-instruct")
 
         self.REFRESH_TIME = get_int("REFRESH_TIME", 4)
         self.PROVIDER_RATE_LIMIT = get_int("PROVIDER_RATE_LIMIT", 40)
@@ -897,7 +900,7 @@ class ProxyStats:
         filtered_entries = []
         q = (query or "").strip().lower()
 
-        for req in self.recent_requests:
+        for req in reversed(self.recent_requests):
             if not q:
                 filtered_entries.append(req)
             else:

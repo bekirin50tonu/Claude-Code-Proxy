@@ -522,18 +522,32 @@ class StreamEngine:
                 if self.block_index == -1 and not self.accumulated_thinking:
                     if "<think" in content.lower() or "<thought" in content.lower():
                         self.initial_pre_think_buffer = ""
-                    else:
+                    elif content.strip().startswith("<"):
                         self.initial_pre_think_buffer += content
-                        if len(self.initial_pre_think_buffer) < 500:
+                        if len(self.initial_pre_think_buffer) < 40:
+                            if "<think" in self.initial_pre_think_buffer.lower() or "<thought" in self.initial_pre_think_buffer.lower():
+                                self.initial_pre_think_buffer = ""
+                                continue
                             continue
                         else:
                             content = self.initial_pre_think_buffer
+                            self.initial_pre_think_buffer = ""
+                    else:
+                        if self.initial_pre_think_buffer:
+                            content = self.initial_pre_think_buffer + content
                             self.initial_pre_think_buffer = ""
 
                 think_events, clean_text = await self.thinking_parser.process_chunk_pipeline(content)
                 if think_events:
                     self.initial_pre_think_buffer = ""
                     for ev in think_events:
+                        ev_type = getattr(ev, "type", None)
+                        if ev_type == "content_block_start":
+                            cb_type = getattr(getattr(ev, "content_block", None), "type", None)
+                            self.current_block_type = cb_type
+                        elif ev_type == "content_block_stop":
+                            self.current_block_type = None
+
                         if hasattr(ev, "delta"):
                             dtype = getattr(ev.delta, "type", None)
                             if dtype == "thinking_delta":
@@ -552,14 +566,15 @@ class StreamEngine:
                 if clean_text:
                     if self.accumulated_thinking:
                         full_think = "".join(self.accumulated_thinking).strip()
-                        if clean_text.strip() and (clean_text.strip() in full_think or full_think.endswith(clean_text.strip())):
+                        c_strip = clean_text.strip()
+                        if len(c_strip) >= 15 and (c_strip in full_think or full_think.endswith(c_strip)):
                             clean_text = ""
-                        elif clean_text:
+                        elif clean_text and "\n" in clean_text:
                             lines = clean_text.splitlines(keepends=True)
                             filtered_lines = []
                             for line in lines:
                                 l_str = line.strip()
-                                if l_str and (l_str in full_think or full_think.endswith(l_str)):
+                                if len(l_str) >= 15 and (l_str in full_think or full_think.endswith(l_str)):
                                     continue
                                 filtered_lines.append(line)
                             clean_text = "".join(filtered_lines)
@@ -568,6 +583,13 @@ class StreamEngine:
                     tool_events, remaining_text = await self.heuristic_tool_parser.process_chunk_pipeline(clean_text)
                     if tool_events:
                         for ev in tool_events:
+                            ev_type = getattr(ev, "type", None)
+                            if ev_type == "content_block_start":
+                                cb_type = getattr(getattr(ev, "content_block", None), "type", None)
+                                self.current_block_type = cb_type
+                            elif ev_type == "content_block_stop":
+                                self.current_block_type = None
+
                             if hasattr(ev, "content_block") and getattr(ev.content_block, "type", None) == "tool_use":
                                 self.text_or_tool_emitted = True
                                 cb = ev.content_block

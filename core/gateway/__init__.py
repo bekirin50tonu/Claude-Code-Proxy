@@ -36,6 +36,13 @@ model_router = model_selector
 router = APIRouter()
 
 
+@router.head("/v1/messages")
+@router.get("/v1/messages")
+async def messages_probe() -> dict[str, str]:
+    """Liveness probe for /v1/messages route."""
+    return {"status": "ok", "service": "claude-code-proxy-v1-messages"}
+
+
 @router.post("/v1/messages")
 async def messages_endpoint(request: Request) -> Any:
     """Anthropic /v1/messages API Gateway endpoint."""

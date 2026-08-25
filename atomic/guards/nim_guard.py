@@ -110,20 +110,30 @@ class NimThrottleGuard:
         timeout_budget = custom_max_queue_wait if custom_max_queue_wait is not None else self.max_queue_wait
 
         # Phase 1: Single-Lane Concurrency Guard
-        remaining = timeout_budget - (time.monotonic() - start_time)
-        if remaining <= 0:
-            logger.warning(
-                "NVIDIA NIM queue timeout before acquiring concurrency lock for model '%s'",
-                model_name,
-            )
-            raise NimQueueTimeoutError(
-                model_name=model_name,
-                waited_seconds=round(time.monotonic() - start_time, 2),
-                max_queue_wait=timeout_budget,
-            )
+        remaining = max(0.1, timeout_budget - (time.monotonic() - start_time))
+        try:
+            await asyncio.wait_for(self._concurrency_lock.acquire(), timeout=remaining)
+        except (asyncio.TimeoutError, TimeoutError):
+            if self._concurrency_lock.locked():
+                logger.warning("NVIDIA NIM concurrency lock appeared stuck for '%s'. Self-healing lock.", model_name)
+                with contextlib.suppress(RuntimeError):
+                    self._concurrency_lock.release()
+                try:
+                    await asyncio.wait_for(self._concurrency_lock.acquire(), timeout=1.0)
+                except Exception:
+                    raise NimQueueTimeoutError(
+                        model_name=model_name,
+                        waited_seconds=round(time.monotonic() - start_time, 2),
+                        max_queue_wait=timeout_budget,
+                    )
+            else:
+                raise NimQueueTimeoutError(
+                    model_name=model_name,
+                    waited_seconds=round(time.monotonic() - start_time, 2),
+                    max_queue_wait=timeout_budget,
+                )
 
-        # Use async with to ensure lock is released even on exception during yield
-        async with asyncio.wait_for(self._concurrency_lock, timeout=remaining):
+        try:
             # Phase 2: Sliding Window Throttling (38 RPM / 60s)
             while True:
                 now = time.monotonic()
@@ -189,6 +199,10 @@ class NimThrottleGuard:
 
             # Phase 3: Single-lane execution lock held across yield
             yield
+        finally:
+            if self._concurrency_lock.locked():
+                with contextlib.suppress(RuntimeError):
+                    self._concurrency_lock.release()
 
     def reset(self) -> None:
         """Reset state for testing."""

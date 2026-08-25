@@ -79,11 +79,46 @@ class DashboardWebSocketManager:
 
     async def _build_initial_snapshot(self) -> dict[str, Any]:
         """Gather current snapshot state across proxy modules."""
-        from config import settings, stats
+        from config import settings, stats, model_registry
         from core.router.daily_tracker import daily_request_tracker
         from core.router.selector import model_selector
 
         router_status = model_selector.get_status()
+
+        client_models = [
+            ("claude_default", "1. DEFAULT (RECOMMENDED)", "Default Model (Nemotron 70B / Llama 3.3)"),
+            ("claude_opus", "2. OPUS (1M CONTEXT)", "Opus (Llama 3.3 70B)"),
+            ("claude_sonnet", "3. SONNET", "Sonnet (Llama 3.3 70B)"),
+            ("claude_sonnet_1m", "4. SONNET 1M", "Sonnet 1M (Llama 3.3 70B)"),
+            ("claude_haiku", "5. HAIKU", "Haiku (Llama 3.1 8B)"),
+        ]
+        client_mappings = []
+        for c_model, label, desc in client_models:
+            primary = model_registry.get_primary(c_model)
+            fallbacks = model_registry.get_fallbacks(c_model)
+            all_chain = [c for c in ([primary] + fallbacks) if c]
+
+            resolved = "ALL_UNAVAILABLE"
+            is_fallback = False
+            step_name = "NONE"
+
+            for idx, cand in enumerate(all_chain):
+                if await model_selector._is_available(cand):
+                    resolved = cand
+                    is_fallback = idx > 0
+                    step_name = "PRIMARY DIRECT" if idx == 0 else f"FALLBACK #{idx}"
+                    break
+
+            client_mappings.append({
+                "client_model": c_model,
+                "label": label,
+                "description": desc,
+                "primary": primary,
+                "resolved_target": resolved,
+                "is_fallback": is_fallback,
+                "step_name": step_name,
+                "chain": all_chain,
+            })
 
         return {
             "stats": {
@@ -101,6 +136,7 @@ class DashboardWebSocketManager:
                     "circuit_open": sum(1 for v in router_status.values() if isinstance(v, dict) and v.get("circuit_breaker", {}).get("state") == "open"),
                 },
                 "models": router_status,
+                "client_mappings": client_mappings,
                 "daily_rpd": daily_request_tracker.all_statuses(),
             },
             "recent_requests": stats.get_recent_dicts(include_payload=False)[:10],

@@ -443,28 +443,29 @@ def test_dashboard_endpoints() -> None:
     res_data = resp.json()
     assert "configs" in res_data
 
-    # 3. Test GET /api/dev/payloads
+    rec_start = time.time()
     stats.record_log(
         method="POST",
         path="/v1/messages",
-        client_model="claude-3-5-sonnet",
+        client_model="claude-3-5-sonnet-test-unique",
         mapped_model="nvidia_nim/meta/llama-3.1-70b-instruct",
         status_code=200,
-        start_time=time.time(),
-        request_body={"model": "claude-3-5-sonnet", "messages": [{"role": "user", "content": "hello"}]},
+        start_time=rec_start,
+        request_body={"model": "claude-3-5-sonnet-test-unique", "messages": [{"role": "user", "content": "hello"}]},
         response_body={"id": "msg_123", "content": [{"type": "text", "text": "hi"}]},
     )
-    resp = client.get("/api/dev/payloads")
+    resp = client.get("/api/dev/payloads?query=claude-3-5-sonnet-test-unique")
     assert resp.status_code == 200
     payload_data = resp.json()
     assert payload_data["total_captured"] > 0
     assert "payloads" in payload_data
+    assert len(payload_data["payloads"]) > 0
 
-    first_req_id = payload_data["payloads"][0]["id"]
-    resp_single = client.get(f"/api/dev/payloads/{first_req_id}")
+    payload_entry = payload_data["payloads"][0]
+    resp_single = client.get(f"/api/dev/payloads/{payload_entry['id']}")
     assert resp_single.status_code == 200
     single_data = resp_single.json()
-    assert single_data["request_body"]["model"] == "claude-3-5-sonnet"
+    assert single_data["request_body"]["model"] == "claude-3-5-sonnet-test-unique"
     assert "key_statuses" in res_data
     assert "MODEL_OPUS" in res_data["configs"]
     assert "OPENROUTER_API_KEY" in res_data["configs"]
@@ -532,6 +533,7 @@ def test_gateway_auth_token_disabled() -> None:
     """Test that when GATEWAY_AUTH_TOKEN is empty, all requests pass through freely."""
     from unittest.mock import AsyncMock, patch
 
+    from fastapi.responses import JSONResponse
     from fastapi.testclient import TestClient
 
     from server import app
@@ -546,22 +548,9 @@ def test_gateway_auth_token_disabled() -> None:
 
         # Request with no auth header should pass through (no 401)
         with (
-            patch("core.gateway.rate_limiter") as mock_rl,
-            patch("core.gateway.provider") as mock_provider,
-            patch("core.gateway.concurrency_semaphore"),
+            patch("core.gateway.gateway_rate_limiter.acquire", AsyncMock(return_value=True)),
+            patch("core.gateway.try_models", AsyncMock(return_value=JSONResponse(content={"type": "message", "role": "assistant", "content": []}))),
         ):
-            mock_rl.acquire = AsyncMock(return_value=True)
-            mock_provider.complete = AsyncMock(
-                return_value={
-                    "id": "msg_test",
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": "hi"}],
-                    "model": "test",
-                    "stop_reason": "end_turn",
-                    "usage": {"input_tokens": 1, "output_tokens": 1},
-                }
-            )
             resp = client.post(
                 "/v1/messages",
                 json={
