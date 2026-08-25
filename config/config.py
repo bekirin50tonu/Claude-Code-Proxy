@@ -56,14 +56,16 @@ def _ensure_models_yaml_exists() -> None:
                 logger.warning(f"Failed to migrate legacy models.yaml from {legacy_path}: {e}")
 
     default_yaml_content = """claude_default:
-  display_name: 1. Default (Recommended - Opus 5 / Nemotron 70B)
+  display_name: 1. Default (Recommended - Llama 3.3 70B)
   description: "Claude Code CLI Default Selection — Highest capacity 1M context model"
-  primary: open_router/poolside/laguna-xs-2.1:free
-  fallback_order: []
+  primary: nvidia_nim/meta/llama-3.3-70b-instruct
+  fallback_order:
+  - nvidia_nim/meta/llama-3.1-70b-instruct
+  - gemini/models/gemini-3.1-flash-lite
   metadata:
     context: 1000000
     max_output: 32768
-    rpm_limit: 15
+    rpm_limit: 38
     tpm_limit: 200000
     tags:
     - default
@@ -72,14 +74,16 @@ def _ensure_models_yaml_exists() -> None:
     - agentic
     - coding
 claude_opus:
-  display_name: 2. Opus (1M context - Nemotron 70B / Llama 3.3)
+  display_name: 2. Opus (Llama 3.3 70B)
   description: "Opus 5 with 1M context — Best for everyday, complex tasks"
-  primary: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
-  fallback_order: []
+  primary: nvidia_nim/meta/llama-3.3-70b-instruct
+  fallback_order:
+  - nvidia_nim/meta/llama-3.1-70b-instruct
+  - gemini/models/gemini-3.1-flash-lite
   metadata:
     context: 1000000
     max_output: 32768
-    rpm_limit: 15
+    rpm_limit: 38
     tpm_limit: 200000
     tags:
     - opus-5
@@ -88,14 +92,16 @@ claude_opus:
     - agentic
     - coding
 claude_sonnet:
-  display_name: 3. Sonnet (Llama 3.1 70B)
+  display_name: 3. Sonnet (Llama 3.3 70B)
   description: "Sonnet — Efficient for routine tasks"
-  primary: nvidia_nim/z-ai/glm-5.2
-  fallback_order: []
+  primary: nvidia_nim/meta/llama-3.3-70b-instruct
+  fallback_order:
+  - nvidia_nim/meta/llama-3.1-70b-instruct
+  - gemini/models/gemini-3.1-flash-lite
   metadata:
     context: 1000000
     max_output: 16384
-    rpm_limit: 15
+    rpm_limit: 38
     tpm_limit: 200000
     tags:
     - sonnet
@@ -103,17 +109,16 @@ claude_sonnet:
     - tool-calling
     - agentic
 claude_sonnet_1m:
-  display_name: 4. Sonnet 5 (1M context - Llama 3.3 70B)
+  display_name: 4. Sonnet 1M (Llama 3.3 70B)
   description: Sonnet 5 for long sessions with 1M context
-  primary: nvidia_nim/z-ai/glm-5.2
+  primary: nvidia_nim/meta/llama-3.3-70b-instruct
   fallback_order:
-  - nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
-  - nvidia_nim/poolside/laguna-xs-2.1
+  - nvidia_nim/meta/llama-3.1-70b-instruct
   - gemini/models/gemini-3.1-flash-lite
   metadata:
     context: 1000000
     max_output: 32768
-    rpm_limit: 15
+    rpm_limit: 38
     tpm_limit: 200000
     tags:
     - sonnet-5
@@ -121,14 +126,15 @@ claude_sonnet_1m:
     - coding
     - tool-calling
 claude_haiku:
-  display_name: 5. Haiku (Fastest 8B / Flash)
-  description: "Haiku 4.5 — Fastest for quick answers"
-  primary: nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b
-  fallback_order: []
+  display_name: 5. Haiku (Fastest Llama 3.1 8B)
+  description: "Haiku — Fastest for quick answers"
+  primary: nvidia_nim/meta/llama-3.1-8b-instruct
+  fallback_order:
+  - gemini/models/gemini-3.1-flash-lite
   metadata:
     context: 200000
     max_output: 8192
-    rpm_limit: 20
+    rpm_limit: 38
     tpm_limit: 100000
     tags:
     - haiku-4.5
