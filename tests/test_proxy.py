@@ -1232,15 +1232,13 @@ def test_dev_logger_records_to_logs_dir(tmp_path: pytest.TempPathFactory) -> Non
 
     raw_content = raw_jsonl.read_text(encoding="utf-8")
     assert "req_test_123" in raw_content
-    assert '"request"' in raw_content
-    assert '"response"' in raw_content
-    assert '"result"' in raw_content
+    assert "stage_1_incoming" in raw_content
+    assert "stage_4_outgoing_anthropic" in raw_content
 
     txt_content = dev_log_txt.read_text(encoding="utf-8")
     assert "req_test_123" in txt_content
-    assert "[1. REQUEST (Claude Code -> Proxy)]" in txt_content
-    assert "[2. RESPONSE (LLM Model -> Proxy)]" in txt_content
-    assert "[3. RESULT (Proxy -> Claude Code)]" in txt_content
+    assert "STAGE 1 [INCOMING REQUEST]" in txt_content
+    assert "STAGE 4 [OUTGOING RESPONSE]" in txt_content
 
 
 def test_file_edit_guard_auto_healing(tmp_path: pytest.TempPathFactory) -> None:
