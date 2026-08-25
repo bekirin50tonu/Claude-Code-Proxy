@@ -118,8 +118,6 @@ class BaseProvider(ABC):
                             "tool_call_id": block.get("tool_use_id") or f"toolu_{uuid.uuid4().hex[:8]}",
                             "content": res_text,
                         }
-                        if block.get("name"):
-                            tool_res_dict["name"] = block.get("name")
                         tool_results.append(tool_res_dict)
 
                 content_str = "\n".join(text_parts) if text_parts else None

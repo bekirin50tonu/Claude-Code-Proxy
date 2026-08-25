@@ -7,6 +7,7 @@ import httpx
 from loguru import logger
 
 from atomic.sanitizers.gemini_sanitizer import GeminiPayloadSanitizer
+from atomic.sanitizers.nim_sanitizer import NimPayloadSanitizer
 from config import settings
 from providers.base import BaseProvider
 
@@ -125,10 +126,13 @@ class OpenAICompatibleProvider(BaseProvider):
 
         provider_part_check = model.split("/", 1)[0] if "/" in model else ""
 
+        p_cfg = settings.get_provider_config(provider_part_check) if provider_part_check else {}
+
         if provider_part_check == "gemini" or "gemini" in model.lower():
             payload = await GeminiPayloadSanitizer.sanitize(payload)
-
-        p_cfg = settings.get_provider_config(provider_part_check) if provider_part_check else {}
+        elif provider_part_check == "nvidia_nim" or "nvidia_nim" in model.lower():
+            max_out = p_cfg.get("max_output")
+            payload = await NimPayloadSanitizer.sanitize(payload, max_output_override=max_out)
         connect_t = p_cfg.get("http_connect_timeout") or settings.HTTP_CONNECT_TIMEOUT
         read_t = p_cfg.get("http_read_timeout") or settings.HTTP_READ_TIMEOUT
         write_t = p_cfg.get("http_write_timeout") or settings.HTTP_WRITE_TIMEOUT
