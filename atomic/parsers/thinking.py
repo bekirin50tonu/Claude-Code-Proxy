@@ -84,9 +84,6 @@ class ThinkingParser(BaseAtomicParser):
                 if match:
                     think_start = match.start()
                     think_end_tag = match.end()
-                    if think_start > 0:
-                        text_before = self.buffer[:think_start]
-                        clean_text_parts.append(text_before)
                     idx = self._ensure_block("thinking", events)
                     self.in_think_tag = True
                     self.buffer = self.buffer[think_end_tag:]
