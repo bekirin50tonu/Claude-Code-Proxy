@@ -56,12 +56,12 @@ def _ensure_models_yaml_exists() -> None:
                 logger.warning(f"Failed to migrate legacy models.yaml from {legacy_path}: {e}")
 
     default_yaml_content = """claude_default:
-  display_name: 1. Default (Recommended - Llama 3.3 70B)
-  description: "Claude Code CLI Default Selection — Highest capacity 1M context model"
-  primary: nvidia_nim/meta/llama-3.3-70b-instruct
+  display_name: 1. Default (Recommended - Nemotron Ultra 550B)
+  description: "Claude Code CLI Default Selection — Nemotron 3 Ultra 550B on NVIDIA NIM"
+  primary: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
   fallback_order:
   - nvidia_nim/meta/llama-3.1-70b-instruct
-  - gemini/models/gemini-3.1-flash-lite
+  - nvidia_nim/meta/llama-3.1-8b-instruct
   metadata:
     context: 1000000
     max_output: 32768
@@ -74,12 +74,12 @@ def _ensure_models_yaml_exists() -> None:
     - agentic
     - coding
 claude_opus:
-  display_name: 2. Opus (Llama 3.3 70B)
-  description: "Opus 5 with 1M context — Best for everyday, complex tasks"
-  primary: nvidia_nim/meta/llama-3.3-70b-instruct
+  display_name: 2. Opus (Nemotron Ultra 550B)
+  description: "Opus 5 with 1M context — Nemotron 3 Ultra 550B"
+  primary: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
   fallback_order:
   - nvidia_nim/meta/llama-3.1-70b-instruct
-  - gemini/models/gemini-3.1-flash-lite
+  - nvidia_nim/meta/llama-3.1-8b-instruct
   metadata:
     context: 1000000
     max_output: 32768
@@ -92,12 +92,12 @@ claude_opus:
     - agentic
     - coding
 claude_sonnet:
-  display_name: 3. Sonnet (Llama 3.3 70B)
-  description: "Sonnet — Efficient for routine tasks"
-  primary: nvidia_nim/meta/llama-3.3-70b-instruct
+  display_name: 3. Sonnet (Nemotron Ultra 550B)
+  description: "Sonnet — Nemotron 3 Ultra 550B on NVIDIA NIM"
+  primary: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
   fallback_order:
   - nvidia_nim/meta/llama-3.1-70b-instruct
-  - gemini/models/gemini-3.1-flash-lite
+  - nvidia_nim/meta/llama-3.1-8b-instruct
   metadata:
     context: 1000000
     max_output: 16384
@@ -109,12 +109,12 @@ claude_sonnet:
     - tool-calling
     - agentic
 claude_sonnet_1m:
-  display_name: 4. Sonnet 1M (Llama 3.3 70B)
-  description: Sonnet 5 for long sessions with 1M context
-  primary: nvidia_nim/meta/llama-3.3-70b-instruct
+  display_name: 4. Sonnet 1M (Nemotron Ultra 550B)
+  description: Sonnet for long sessions with 1M context — Nemotron 3 Ultra 550B
+  primary: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
   fallback_order:
   - nvidia_nim/meta/llama-3.1-70b-instruct
-  - gemini/models/gemini-3.1-flash-lite
+  - nvidia_nim/meta/llama-3.1-8b-instruct
   metadata:
     context: 1000000
     max_output: 32768
@@ -130,7 +130,7 @@ claude_haiku:
   description: "Haiku — Fastest for quick answers"
   primary: nvidia_nim/meta/llama-3.1-8b-instruct
   fallback_order:
-  - gemini/models/gemini-3.1-flash-lite
+  - nvidia_nim/meta/llama-3.1-70b-instruct
   metadata:
     context: 200000
     max_output: 8192
@@ -545,11 +545,11 @@ class Settings(BaseModel):
     OLLAMA_BASE_URL: str = Field(default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
 
     # Model Mappings (format: provider_type/model/name)
-    MODEL_OPUS: str = Field(default_factory=lambda: os.getenv("MODEL_OPUS", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct"))
-    MODEL_SONNET: str = Field(default_factory=lambda: os.getenv("MODEL_SONNET", "nvidia_nim/meta/llama-3.1-70b-instruct"))
-    MODEL_SONNET_1M: str = Field(default_factory=lambda: os.getenv("MODEL_SONNET_1M", "open_router/meta-llama/llama-3.3-70b-instruct"))
+    MODEL_OPUS: str = Field(default_factory=lambda: os.getenv("MODEL_OPUS", "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b"))
+    MODEL_SONNET: str = Field(default_factory=lambda: os.getenv("MODEL_SONNET", "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b"))
+    MODEL_SONNET_1M: str = Field(default_factory=lambda: os.getenv("MODEL_SONNET_1M", "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b"))
     MODEL_HAIKU: str = Field(default_factory=lambda: os.getenv("MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct"))
-    MODEL: str = Field(default_factory=lambda: os.getenv("MODEL", "nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct"))
+    MODEL: str = Field(default_factory=lambda: os.getenv("MODEL", "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b"))
 
     # Provider rate limits and performance controls
     REFRESH_TIME: int = Field(default_factory=lambda: get_int("REFRESH_TIME", 4))
