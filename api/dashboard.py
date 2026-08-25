@@ -84,7 +84,7 @@ async def fetch_models_from_url(
 ) -> list[str]:
     """Asynchronously fetch list of models from a completions-compatible models endpoint."""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=1.5) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()

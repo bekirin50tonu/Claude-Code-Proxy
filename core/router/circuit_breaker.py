@@ -131,32 +131,36 @@ class CircuitBreaker:
         """Force circuit breaker into OPEN state with given failure reason."""
         await self.trip_or_extend(reason=reason)
 
+    def _check_daily_quota_internal(self) -> bool:
+        """Internal helper without acquiring self._lock (caller must hold self._lock)."""
+        provider = self.model_id.split("/", 1)[0] if "/" in self.model_id else "nvidia_nim"
+        from core.router.daily_tracker import daily_request_tracker
+        exceeded, cur, limit = daily_request_tracker.is_exceeded(provider)
+
+        if exceeded:
+            if self._state != CircuitState.OPEN or "RPD" not in self._last_failure_reason:
+                self._state = CircuitState.OPEN
+                now_wall = time.time()
+                self.started_at = now_wall
+                self.expired_at = None
+                self._opened_at_wall = time.strftime("%H:%M:%S", time.localtime(now_wall))
+                self._reopens_at_wall = "Midnight (RPD Reset)"
+                self._last_failure_reason = f"Daily RPD limit reached ({cur}/{limit})"
+                reg = self._get_registry()
+                reg.save_to_file()
+                reg.notify_trip(self.model_id, self._last_failure_reason)
+            return True
+        return False
+
     async def check_daily_quota(self) -> bool:
         """Check daily RPD tracker quota and update circuit state if exceeded."""
         async with self._lock:
-            provider = self.model_id.split("/", 1)[0] if "/" in self.model_id else "nvidia_nim"
-            from core.router.daily_tracker import daily_request_tracker
-            exceeded, cur, limit = daily_request_tracker.is_exceeded(provider)
-
-            if exceeded:
-                if self._state != CircuitState.OPEN or "RPD" not in self._last_failure_reason:
-                    self._state = CircuitState.OPEN
-                    now_wall = time.time()
-                    self.started_at = now_wall
-                    self.expired_at = None
-                    self._opened_at_wall = time.strftime("%H:%M:%S", time.localtime(now_wall))
-                    self._reopens_at_wall = "Midnight (RPD Reset)"
-                    self._last_failure_reason = f"Daily RPD limit reached ({cur}/{limit})"
-                    reg = self._get_registry()
-                    reg.save_to_file()
-                    reg.notify_trip(self.model_id, self._last_failure_reason)
-                return True
-            return False
+            return self._check_daily_quota_internal()
 
     async def is_open(self) -> bool:
         """Return True when requests should be blocked (OPEN state)."""
         async with self._lock:
-            if await self.check_daily_quota():
+            if self._check_daily_quota_internal():
                 return True
             if self._state == CircuitState.OPEN:
                 now_wall = time.time()
