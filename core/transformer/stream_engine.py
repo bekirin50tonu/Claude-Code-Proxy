@@ -686,6 +686,11 @@ class StreamEngine:
             parsed_args = safe_parse_json(repaired_args_str) or {}
 
             if isinstance(parsed_args, dict):
+                tname_lower = st["tool_name"].lower()
+                if "ok" in parsed_args or any(k in tname_lower for k in ("exit_session", "stop_hook", "save_session_summary", "evaluator", "goal")):
+                    from core.interceptor.json_repair import JSONRepairNormalizer
+                    parsed_args = await JSONRepairNormalizer.normalize_stop_hook_schema(parsed_args)
+
                 parsed_args = await self.subagent_guard.enforce_tool_call(st["tool_name"], parsed_args)
                 from atomic.guards.file_edit_guard import file_edit_guard
                 parsed_args = file_edit_guard.sanitize_tool_input(st["tool_name"], parsed_args)
@@ -711,6 +716,12 @@ class StreamEngine:
 
             if extracted_tools:
                 for tool in extracted_tools:
+                    tname_lower = tool.get("name", "").lower()
+                    if isinstance(tool.get("input"), dict):
+                        if "ok" in tool["input"] or any(k in tname_lower for k in ("exit_session", "stop_hook", "save_session_summary", "evaluator", "goal")):
+                            from core.interceptor.json_repair import JSONRepairNormalizer
+                            tool["input"] = await JSONRepairNormalizer.normalize_stop_hook_schema(tool["input"])
+
                     tool["input"] = await self.subagent_guard.enforce_tool_call(tool["name"], tool.get("input", {}))
                     from atomic.guards.file_edit_guard import file_edit_guard
                     tool["input"] = file_edit_guard.sanitize_tool_input(tool["name"], tool.get("input", {}))

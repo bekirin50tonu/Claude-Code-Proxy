@@ -231,12 +231,16 @@ class JSONRepairNormalizer:
             # Check if this is a Stop Hook Evaluator response schema {"ok": bool, "reason": str}
             if "ok" in data:
                 raw_ok = data["ok"]
-                ok_bool = True if str(raw_ok).lower() in ("true", "1", "yes") else False
-                return {
+                ok_bool = raw_ok if isinstance(raw_ok, bool) else (str(raw_ok).lower() in ("true", "1", "yes"))
+                res: dict[str, Any] = {
                     "ok": ok_bool,
                     "reason": str(data.get("reason", "")),
-                    "impossible": bool(data.get("impossible", False)) if "impossible" in data else False,
                 }
+                if "impossible" in data:
+                    raw_imp = data["impossible"]
+                    imp_bool = raw_imp if isinstance(raw_imp, bool) else (str(raw_imp).lower() in ("true", "1", "yes"))
+                    res["impossible"] = imp_bool
+                return res
             # Normalize key aliases for traditional stop hook schemas
             for k, v in data.items():
                 canonical_key = cls.KEY_ALIASES.get(k.lower(), k)
@@ -293,8 +297,9 @@ class JSONRepairNormalizer:
             if "ok" in repaired_data or any(k.lower() in ("summary", "memory", "memories", "session_summary", "stop_hook_active", "should_stop") for k in repaired_data):
                 is_evaluator_or_stop_hook = True
 
-        if is_evaluator_or_stop_hook and isinstance(repaired_data, (dict, str, list)):
-            normalized_dict = await cls.normalize_stop_hook_schema(repaired_data)
+        if is_evaluator_or_stop_hook:
+            target_input = repaired_data if repaired_data is not None else text
+            normalized_dict = await cls.normalize_stop_hook_schema(target_input)
             return json.dumps(normalized_dict, ensure_ascii=False)
 
         return text
@@ -331,9 +336,14 @@ class JSONRepairNormalizer:
                             block["text"] = await cls.process_text(raw_text, is_stop_hook=False)
                     elif block.get("type") == "tool_use":
                         tname = block.get("name", "")
+                        tname_lower = tname.lower()
                         if "input" in block and isinstance(block["input"], dict):
+                            inp = block["input"]
+                            if is_stop_hook or "ok" in inp or any(k in tname_lower for k in ("exit_session", "stop_hook", "save_session_summary", "evaluator", "goal")):
+                                inp = await cls.normalize_stop_hook_schema(inp)
+
                             from atomic.guards.subagent import subagent_guard
-                            block["input"] = await subagent_guard.enforce_tool_call(tname, block["input"], enabled=subagents_enabled)
+                            block["input"] = await subagent_guard.enforce_tool_call(tname, inp, enabled=subagents_enabled)
 
             data["content"] = content_list
 
