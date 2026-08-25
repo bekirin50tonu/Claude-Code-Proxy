@@ -102,29 +102,33 @@ class GeminiPayloadSanitizer:
         for key in unsupported_keys:
             payload.pop(key, None)
 
-        # 5. Sanitize tools schema if present
-        if "tools" in payload and isinstance(payload["tools"], list):
-            valid_tools = []
-            for tool in payload["tools"]:
-                if not isinstance(tool, dict):
-                    continue
-                if tool.get("type") == "function" and "function" in tool:
-                    fn = tool["function"]
-                    if isinstance(fn, dict) and fn.get("name"):
-                        params = fn.get("parameters")
-                        if not isinstance(params, dict):
-                            fn["parameters"] = {"type": "object", "properties": {}}
-                        else:
-                            if "type" not in params:
-                                params["type"] = "object"
-                            if "properties" not in params or not isinstance(params["properties"], dict):
-                                params["properties"] = {}
-                        valid_tools.append(tool)
-            if valid_tools:
-                payload["tools"] = valid_tools
-            else:
-                payload.pop("tools", None)
-                payload.pop("tool_choice", None)
+        # 5. Convert native tools to prompt instructions for Gemini (prevents 400 thought_signature error)
+        tools = payload.pop("tools", None)
+        payload.pop("tool_choice", None)
+        if tools and isinstance(tools, list):
+            tool_descriptions = []
+            for t in tools:
+                if isinstance(t, dict) and t.get("type") == "function" and "function" in t:
+                    fn = t["function"]
+                    name = fn.get("name", "")
+                    desc = fn.get("description", "")
+                    params = fn.get("parameters", {})
+                    tool_descriptions.append(f"- Name: {name}\n  Description: {desc}\n  Parameters: {params}")
+
+            if tool_descriptions:
+                xml_instructions = (
+                    "\n\n[AVAILABLE TOOLS]\n"
+                    + "\n".join(tool_descriptions)
+                    + "\n\nTo call a tool, format your response as:\n"
+                    + "<tool_call><name>TOOL_NAME</name><parameters>JSON_PARAMETERS</parameters></tool_call>\n"
+                )
+                messages = payload.get("messages", [])
+                if messages and isinstance(messages, list):
+                    first_msg = messages[0]
+                    if isinstance(first_msg, dict) and first_msg.get("role") == "system":
+                        first_msg["content"] = str(first_msg.get("content", "")) + xml_instructions
+                    else:
+                        messages.insert(0, {"role": "system", "content": "You are a helpful coding assistant." + xml_instructions})
 
         return payload
 
@@ -168,7 +172,7 @@ class GeminiPayloadSanitizer:
     def _inject_dummy_tool_calls(
         cls, messages: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        """Ensure every `tool` role message has a matching `tool_calls` entry in preceding assistant message."""
+        """Flatten native OpenAI tool_calls and `role: tool` messages into plain Hermes XML text for Gemini."""
         processed: list[dict[str, Any]] = []
 
         for msg in messages:
@@ -176,80 +180,33 @@ class GeminiPayloadSanitizer:
                 continue
 
             role = msg.get("role", "user")
-            if role != "tool":
-                processed.append(msg)
-                continue
 
-            # Handle `role: tool` message
-            tool_call_id = msg.get("tool_call_id") or f"call_synth_{len(processed)}"
-            msg["tool_call_id"] = tool_call_id
-            tool_name = msg.get("name") or "execute_bash"
-
-            # Normalize tool message content
-            content = msg.get("content")
-            if content is None or (isinstance(content, str) and not content.strip()):
-                msg["content"] = "Tool execution completed."
-            elif not isinstance(content, str):
-                msg["content"] = str(content)
-
-            # Find nearest preceding assistant message in current turn block
-            nearest_assistant: dict[str, Any] | None = None
-            for prev in reversed(processed):
-                prev_role = prev.get("role")
-                if prev_role == "assistant":
-                    nearest_assistant = prev
-                    break
-                elif prev_role in ("user", "system"):
-                    # Turn boundary reached
-                    break
-
-            if nearest_assistant is not None:
-                tool_calls = nearest_assistant.get("tool_calls")
-                if not isinstance(tool_calls, list):
-                    tool_calls = []
-                    nearest_assistant["tool_calls"] = tool_calls
-
-                has_match = any(
-                    isinstance(tc, dict) and tc.get("id") == tool_call_id
-                    for tc in tool_calls
-                )
-                if not has_match:
-                    tool_calls.append(
-                        {
-                            "id": tool_call_id,
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "arguments": "{}",
-                            },
-                        }
-                    )
-            else:
-                # No preceding assistant message in current turn block — inject synthetic assistant message!
-                synthetic_assistant = {
+            if role == "tool":
+                # Convert `role: tool` to `role: user` with clear Tool Result tag
+                t_name = msg.get("name") or "tool"
+                content = cls._stringify_content(msg.get("content"))
+                processed.append({
+                    "role": "user",
+                    "content": f"[Tool Output for {t_name}]:\n{content}"
+                })
+            elif role == "assistant" and msg.get("tool_calls"):
+                # Convert assistant native `tool_calls` array into Hermes XML text
+                existing_text = cls._stringify_content(msg.get("content"))
+                xml_calls = []
+                for tc in msg.get("tool_calls", []):
+                    if isinstance(tc, dict) and "function" in tc:
+                        fn = tc["function"]
+                        n = fn.get("name", "")
+                        args = fn.get("arguments", "{}")
+                        xml_calls.append(f"<tool_call><name>{n}</name><parameters>{args}</parameters></tool_call>")
+                
+                full_content = (existing_text + "\n" + "\n".join(xml_calls)).strip()
+                processed.append({
                     "role": "assistant",
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": tool_call_id,
-                            "type": "function",
-                            "function": {
-                                "name": tool_name,
-                                "arguments": "{}",
-                            },
-                        }
-                    ],
-                }
-                processed.append(synthetic_assistant)
-
-            processed.append(msg)
-
-        # Clean content for assistant messages that have tool_calls
-        for m in processed:
-            if m.get("role") == "assistant" and m.get("tool_calls"):
-                c = m.get("content")
-                if c is not None and isinstance(c, str) and not c.strip():
-                    m["content"] = None
+                    "content": full_content
+                })
+            else:
+                processed.append(msg)
 
         return processed
 

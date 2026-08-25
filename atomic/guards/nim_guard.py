@@ -35,7 +35,8 @@ class NimThrottleGuard:
         self._max_queue_wait = max_queue_wait
         self.max_sleep_threshold = max_sleep_threshold
 
-        self._concurrency_lock = asyncio.Lock()
+        self._concurrency_limit = 5
+        self._concurrency_semaphore = asyncio.Semaphore(self._concurrency_limit)
         self._state_lock = asyncio.Lock()
         self._timestamps: list[float] = []
 
@@ -109,10 +110,10 @@ class NimThrottleGuard:
         start_time = time.monotonic()
         timeout_budget = custom_max_queue_wait if custom_max_queue_wait is not None else self.max_queue_wait
 
-        # Phase 1: Single-Lane Concurrency Guard
+        # Phase 1: Multi-Lane Concurrency Guard (Semaphore capacity = 5)
         remaining = max(0.001, timeout_budget - (time.monotonic() - start_time))
         try:
-            await asyncio.wait_for(self._concurrency_lock.acquire(), timeout=remaining)
+            await asyncio.wait_for(self._concurrency_semaphore.acquire(), timeout=remaining)
         except (asyncio.TimeoutError, TimeoutError):
             raise NimQueueTimeoutError(
                 model_name=model_name,
@@ -142,13 +143,14 @@ class NimThrottleGuard:
                 waited_so_far = time.monotonic() - start_time
                 remaining_budget = timeout_budget - waited_so_far
 
-                # Fast Fallback: If throttle sleep needed exceeds max_sleep_threshold (3s), raise NimQueueTimeoutError immediately!
-                if sleep_needed > self.max_sleep_threshold or remaining_budget <= 0 or sleep_needed > remaining_budget:
+                # Fast Fallback: If throttle sleep needed exceeds 15.0s, trigger fallback!
+                max_sleep_limit = max(self.max_sleep_threshold, 15.0)
+                if sleep_needed > max_sleep_limit or remaining_budget <= 0 or sleep_needed > remaining_budget:
                     total_expected_wait = waited_so_far + max(0.0, sleep_needed)
                     logger.warning(
-                        "NVIDIA NIM throttle sleep delay (%.2fs) exceeds max threshold (%.2fs) for '%s'. Triggering fast fallback to secondary models.",
+                        "NVIDIA NIM throttle sleep delay (%.2fs) exceeds limit (%.2fs) for '%s'. Triggering fallback to secondary models.",
                         sleep_needed,
-                        self.max_sleep_threshold,
+                        max_sleep_limit,
                         model_name,
                     )
                     raise NimQueueTimeoutError(
@@ -184,12 +186,11 @@ class NimThrottleGuard:
                 finally:
                     self._active_sleeps.pop(req_id, None)
 
-            # Phase 3: Single-lane execution lock held across yield
+            # Phase 3: Multi-lane execution held across yield
             yield
         finally:
-            if self._concurrency_lock.locked():
-                with contextlib.suppress(RuntimeError):
-                    self._concurrency_lock.release()
+            with contextlib.suppress(RuntimeError):
+                self._concurrency_semaphore.release()
 
     def reset(self) -> None:
         """Reset state for testing."""
@@ -198,9 +199,6 @@ class NimThrottleGuard:
         self.total_sleep_time_seconds = 0.0
         self._active_sleeps.clear()
         self.last_sleep_event = None
-        if self._concurrency_lock.locked():
-            with contextlib.suppress(RuntimeError):
-                self._concurrency_lock.release()
 
 
 nim_throttle_guard = NimThrottleGuard()

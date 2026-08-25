@@ -53,10 +53,10 @@ async def test_dummy_tool_call_injection_preceding_assistant() -> None:
     assert len(res_msgs) == 3
     assistant_msg = res_msgs[1]
     assert assistant_msg["role"] == "assistant"
-    assert "tool_calls" in assistant_msg
-    assert len(assistant_msg["tool_calls"]) == 1
-    assert assistant_msg["tool_calls"][0]["id"] == "call_abc123"
-    assert assistant_msg["tool_calls"][0]["function"]["name"] == "execute_bash"
+    assert assistant_msg["content"] == "I will run the command now."
+    tool_res_msg = res_msgs[2]
+    assert tool_res_msg["role"] == "user"
+    assert "[Tool Output for execute_bash]:" in tool_res_msg["content"]
 
 
 @pytest.mark.asyncio
@@ -74,12 +74,10 @@ async def test_dummy_tool_call_injection_no_preceding_assistant() -> None:
     sanitized = await GeminiPayloadSanitizer.sanitize(payload)
 
     res_msgs = sanitized["messages"]
-    assert len(res_msgs) == 3
+    assert len(res_msgs) == 1
     assert res_msgs[0]["role"] == "user"
-    assert res_msgs[1]["role"] == "assistant"
-    assert res_msgs[1]["content"] is None
-    assert res_msgs[1]["tool_calls"][0]["id"] == "call_orphan"
-    assert res_msgs[2]["role"] == "tool"
+    assert "Run tool without assistant step" in res_msgs[0]["content"]
+    assert "[Tool Output for str_replace_editor]:" in res_msgs[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -122,10 +120,8 @@ async def test_consecutive_assistant_roles_merging() -> None:
     assert len(res_msgs) == 2
     assert res_msgs[0]["role"] == "user"
     assert res_msgs[1]["role"] == "assistant"
-    assert res_msgs[1]["content"] == "Part 1\n\nPart 2"
-    assert len(res_msgs[1]["tool_calls"]) == 2
-    assert res_msgs[1]["tool_calls"][0]["id"] == "t1"
-    assert res_msgs[1]["tool_calls"][1]["id"] == "t2"
+    assert "Part 1" in res_msgs[1]["content"]
+    assert "Part 2" in res_msgs[1]["content"]
 
 
 @pytest.mark.asyncio

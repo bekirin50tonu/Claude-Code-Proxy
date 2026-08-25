@@ -13,7 +13,7 @@ from shared.exceptions import NimQueueTimeoutError
 
 @pytest.mark.asyncio
 async def test_nim_single_lane_concurrency_guard():
-    """Verify that requests to NVIDIA NIM execute serially (concurrency = 1)."""
+    """Verify that requests to NVIDIA NIM execute within concurrency limit (max_concurrency = 5)."""
     guard = NimThrottleGuard(rpm_limit=10, window_seconds=60.0, max_queue_wait=5.0)
     execution_order: list[str] = []
     active_count = 0
@@ -36,7 +36,7 @@ async def test_nim_single_lane_concurrency_guard():
         worker("C"),
     )
 
-    assert max_observed_concurrency == 1
+    assert max_observed_concurrency <= 5
     assert len(execution_order) == 6
 
 
@@ -64,21 +64,29 @@ async def test_nim_sliding_window_rate_limiter_throttling():
 @pytest.mark.asyncio
 async def test_nim_queue_timeout_raises_error():
     """Verify that NimQueueTimeoutError is raised when queue wait time exceeds max_queue_wait."""
-    guard = NimThrottleGuard(rpm_limit=2, window_seconds=60.0, max_queue_wait=0.1)
+    guard = NimThrottleGuard(rpm_limit=10, window_seconds=60.0, max_queue_wait=0.1)
 
-    # Acquire lock and hold it for longer than max_queue_wait (0.2s > 0.1s)
+    # Acquire all 5 semaphore slots to block queue
     async def slow_holder():
         async with guard.acquire("nvidia_nim/test"):
             await asyncio.sleep(0.25)
 
     async def waiting_request():
-        await asyncio.sleep(0.02)  # ensure slow_holder gets lock first
+        await asyncio.sleep(0.02)  # ensure slow_holders get locks first
         with pytest.raises(NimQueueTimeoutError) as exc_info:
             async with guard.acquire("nvidia_nim/test"):
                 pass
         assert "queue timeout" in str(exc_info.value).lower()
 
-    await asyncio.gather(slow_holder(), waiting_request())
+    # Launch 5 holders to fill capacity, plus 1 waiting request
+    await asyncio.gather(
+        slow_holder(),
+        slow_holder(),
+        slow_holder(),
+        slow_holder(),
+        slow_holder(),
+        waiting_request(),
+    )
 
 
 def test_gateway_nim_queue_timeout_triggers_openrouter_fallback():
