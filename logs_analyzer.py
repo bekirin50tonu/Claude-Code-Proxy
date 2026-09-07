@@ -8,9 +8,9 @@ Stage 3: [RAW UPSTREAM RESPONSE] Upstream LLM Provider -> Proxy
 Stage 4: [OUTGOING ANTHROPIC RESPONSE] Proxy -> Claude Code CLI
 """
 
-import sys
-import json
 import argparse
+import json
+import sys
 from pathlib import Path
 
 LOGS_DIR = Path(__file__).parent / "logs"

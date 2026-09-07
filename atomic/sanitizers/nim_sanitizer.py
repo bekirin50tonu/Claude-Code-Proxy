@@ -13,7 +13,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Maximum output token limit enforced by NVIDIA NIM for LLaMA & Nemotron models
-NVIDIA_NIM_MAX_OUTPUT_CAP = 8192
+NVIDIA_NIM_MAX_OUTPUT_CAP = 32768
 
 
 class NimPayloadSanitizer:
@@ -22,7 +22,7 @@ class NimPayloadSanitizer:
         """Sanitize request payload before sending to NVIDIA NIM endpoint."""
         clean_payload = dict(payload)
 
-        # 1. Clamp max_tokens to NIM output limit (default 8192 cap if higher)
+        # 1. Clamp max_tokens to NIM output limit (default 32768 cap if higher)
         max_output_limit = max_output_override or NVIDIA_NIM_MAX_OUTPUT_CAP
         if "max_tokens" in clean_payload:
             original_max_tokens = clean_payload["max_tokens"]
@@ -34,16 +34,34 @@ class NimPayloadSanitizer:
                     max_output_limit,
                 )
 
-        # 2. Remove non-standard root parameters that cause 400 Bad Request on OpenAI/NIM API
+        # 2. Extract and translate structured output if output_config is present
+        output_config = clean_payload.pop("output_config", None)
+        if output_config and isinstance(output_config, dict):
+            fmt = output_config.get("format", {})
+            if fmt.get("type") == "json_schema":
+                clean_payload.setdefault("response_format", {"type": "json_object"})
+
+        # Remove non-standard root parameters that cause 400 Bad Request on OpenAI/NIM API
         unsupported_root_params = [
             "thinking",
             "context_management",
-            "output_config",
             "cache_control",
             "metadata",
         ]
         for param in unsupported_root_params:
             clean_payload.pop(param, None)
+
+        # 2b. Inject NVIDIA NIM native reasoning split & chat template kwargs directly into payload root
+        clean_payload.pop("extra_body", None)
+        clean_payload.setdefault(
+            "chat_template_kwargs",
+            {
+                "thinking": True,
+                "enable_thinking": True,
+                "reasoning_split": True,
+                "clear_thinking": False,
+            },
+        )
 
         # 3. Normalize tool_choice
         if "tool_choice" in clean_payload:

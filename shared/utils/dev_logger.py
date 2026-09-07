@@ -18,7 +18,38 @@ class DevLogger:
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.raw_jsonl_path = self.logs_dir / "raw_requests.jsonl"
         self.dev_log_path = self.logs_dir / "dev_proxy.log"
-        self.errors_log_path = self.logs_dir / "errors.log"
+    def record_transaction_start(
+        self,
+        request_id: str,
+        method: str,
+        path: str,
+        client_model: str,
+        mapped_model: str,
+        request_body: dict[str, Any] | None = None,
+    ) -> None:
+        """Write instant IN-FLIGHT entry at request start to prevent empty log windows."""
+        timestamp_human = time.strftime("%Y-%m-%d %H:%M:%S")
+        req_b = request_body or {}
+        messages = req_b.get("messages", [])
+        last_user_msg = ""
+        if isinstance(messages, list):
+            for m in reversed(messages):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    c = m.get("content")
+                    last_user_msg = c[:200] if isinstance(c, str) else str(c)[:200]
+                    break
+
+        entry = (
+            f"[{timestamp_human}] 🚀 [IN_FLIGHT START] ID: {request_id} | {method} {path}\n"
+            f"  Client Model: {client_model} -> Target Upstream Model: {mapped_model}\n"
+            f"  Last User Msg: {repr(last_user_msg)}\n"
+            f"{'-' * 85}\n\n"
+        )
+        try:
+            with open(self.dev_log_path, "a", encoding="utf-8") as f:
+                f.write(entry)
+        except Exception as exc:
+            logger.warning("DevLogger: Failed to write in-flight start to %s: %s", self.dev_log_path, exc)
 
     def record_transaction(
         self,
@@ -99,13 +130,13 @@ class DevLogger:
         # 1. Append JSON record to logs/raw_requests.jsonl
         try:
             with open(self.raw_jsonl_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
         except Exception as exc:
-            logger.warning("DevLogger: Failed to write to %s: %s", self.raw_jsonl_path, exc)
+            logger.warning("DevLogger: Failed to write to {}: {}", self.raw_jsonl_path, exc)
 
         # 2. Append 4-stage formatted text record to logs/dev_proxy.log
         try:
-            error_str = f"  ⚠️ ERROR DETAILS: {json.dumps(error_details)}\n" if error_details else ""
+            error_str = f"  ⚠️ ERROR DETAILS: {json.dumps(error_details, default=str)}\n" if error_details else ""
             fb_str = f" (Fallbacks used: {', '.join(fallbacks_used)})" if fallbacks_used else ""
             dev_entry = (
                 f"{'=' * 85}\n"
@@ -117,7 +148,7 @@ class DevLogger:
                 f"STAGE 2 [TRANSLATED UPSTREAM]: Proxy Gateway -> Upstream LLM\n"
                 f"  Mapped Model: {mapped_model}{fb_str}\n"
                 f"STAGE 3 [RAW UPSTREAM RESPONSE]: Upstream LLM -> Proxy Gateway\n"
-                f"  Status: {status_code} | Payload: {json.dumps(upstream_response or response_body, ensure_ascii=False)[:300] if (upstream_response or response_body) else 'None'}\n"
+                f"  Status: {status_code} | Payload: {json.dumps(upstream_response or response_body, ensure_ascii=False, default=str)[:300] if (upstream_response or response_body) else 'None'}\n"
                 f"STAGE 4 [OUTGOING RESPONSE]: Proxy Gateway -> Claude Code CLI\n"
                 f"  Status: {status_code} | Sanitizations: {', '.join(sanitizations)}\n"
                 f"{error_str}"
@@ -126,7 +157,7 @@ class DevLogger:
             with open(self.dev_log_path, "a", encoding="utf-8") as f:
                 f.write(dev_entry)
         except Exception as exc:
-            logger.warning("DevLogger: Failed to write to %s: %s", self.dev_log_path, exc)
+            logger.warning("DevLogger: Failed to write to {}: {}", self.dev_log_path, exc)
 
         # 3. If error occurred, write dedicated entry to logs/errors.log
         if status_code >= 400 or error_details:
@@ -135,8 +166,8 @@ class DevLogger:
                     f"[{timestamp_human}] [ERROR {status_code}] ID: {request_id} | {method} {path}\n"
                     f"  STAGE 1 (Client Model): {client_model}\n"
                     f"  STAGE 2 (Upstream Model): {mapped_model} (Tried: {fallbacks_used or []})\n"
-                    f"  STAGE 3 (Upstream Output): {json.dumps(upstream_response or response_body, ensure_ascii=False)[:400]}\n"
-                    f"  DETAILS: {json.dumps(error_details or response_body, ensure_ascii=False)}\n"
+                    f"  STAGE 3 (Upstream Output): {json.dumps(upstream_response or response_body, ensure_ascii=False, default=str)[:400]}\n"
+                    f"  DETAILS: {json.dumps(error_details or response_body, ensure_ascii=False, default=str)}\n"
                     f"{'=' * 85}\n"
                 )
                 with open(self.errors_log_path, "a", encoding="utf-8") as f:

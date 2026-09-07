@@ -251,6 +251,10 @@ class DiscordBotAdapter(BaseBotAdapter):
             except Exception as e:
                 logger.warning(f"Failed to send Discord proactive alert to channel {cid}: {e}")
 
+    async def send_circuit_breaker_recovery(self, model_id: str) -> None:
+        """No-op for Discord: token not provided (see __init__)."""
+        return  # ponytail: keep interface symmetric, Discord is optional
+
     async def send_to_thread(self, session_id: str, title: str, text: str) -> None:
         """Send message update directly to a Discord thread."""
         if not self.client or self.client.is_closed():

@@ -1,5 +1,9 @@
 import pytest
-from atomic.sanitizers.nim_sanitizer import NimPayloadSanitizer, NVIDIA_NIM_MAX_OUTPUT_CAP
+
+from atomic.sanitizers.nim_sanitizer import (
+    NVIDIA_NIM_MAX_OUTPUT_CAP,
+    NimPayloadSanitizer,
+)
 
 
 @pytest.mark.asyncio

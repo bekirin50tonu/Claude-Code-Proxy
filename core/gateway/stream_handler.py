@@ -7,6 +7,30 @@ from typing import Any
 from config import stats
 
 
+def extract_session_id(request: Any, body: dict[str, Any] | None = None) -> str:
+    """Extract session ID reliably from HTTP headers or nested body metadata."""
+    if hasattr(request, "headers"):
+        header_sid = request.headers.get("x-session-id") or request.headers.get("x-conversation-id")
+        if header_sid and str(header_sid).strip():
+            return str(header_sid).strip()
+
+    if body and isinstance(body, dict):
+        meta = body.get("metadata")
+        if isinstance(meta, dict):
+            sid = meta.get("session_id") or meta.get("conversation_id")
+            if sid and isinstance(sid, str) and sid.strip():
+                return sid.strip()
+            user_id = meta.get("user_id")
+            if isinstance(user_id, str) and "session_id" in user_id:
+                try:
+                    uid_data = json.loads(user_id)
+                    if isinstance(uid_data, dict) and uid_data.get("session_id"):
+                        return str(uid_data["session_id"]).strip()
+                except Exception:
+                    pass
+    return "default_session"
+
+
 def record_request_log(
     method: str,
     path: str,

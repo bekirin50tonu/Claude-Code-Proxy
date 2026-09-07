@@ -25,6 +25,7 @@ from bot.base import BaseBotAdapter
 from bot.formatters import (
     escape_markdown_v2,
     format_circuit_breaker_alert_tg,
+    format_circuit_breaker_recovery_tg,
     format_status_overview_tg,
 )
 from bot.handlers.ask import handle_ask_command
@@ -167,6 +168,24 @@ class TelegramBotAdapter(BaseBotAdapter):
             logger.info(f"Proactive alert sent to Telegram chat {chat_id} for model {model_id}")
         except Exception as e:
             logger.warning(f"Failed to send Telegram proactive alert: {e}")
+
+    async def send_circuit_breaker_recovery(self, model_id: str) -> None:
+        """Send proactive notification when a circuit breaker transitions to CLOSED."""
+        if not self.app or not settings.ALLOWED_TELEGRAM_USER_ID:
+            return
+        chat_id = settings.ALLOWED_TELEGRAM_USER_ID.strip()
+        if not chat_id:
+            return
+        try:
+            text = format_circuit_breaker_recovery_tg(model_id)
+            await self.app.bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+            logger.info(f"Circuit recovery alert sent to Telegram chat {chat_id} for model {model_id}")
+        except Exception as e:
+            logger.warning(f"Failed to send Telegram recovery alert: {e}")
 
     async def send_to_thread(self, session_id: str, title: str, text: str) -> None:
         """Send message under session parent thread on Telegram."""
@@ -597,9 +616,9 @@ class TelegramBotAdapter(BaseBotAdapter):
                 logger.warning(f"Failed to edit alert message on reset callback: {e}")
 
         elif data.startswith("extend_cb:"):
-            parts = data.split(":", 2)
-            model_id = parts[1]
-            secs = float(parts[2])
+            payload = data.split("extend_cb:", 1)[1]
+            model_id, secs_str = payload.rsplit(":", 1)
+            secs = float(secs_str)
             cb = circuit_breaker_registry.get(model_id)
 
             now_wall = time.time()

@@ -77,3 +77,20 @@ async def test_get_active_candidate_keys(monkeypatch, key_manager):
     # Active keys (key1, key3) first, passive key2 last
     assert candidates[0] in ("nvapi-key1", "nvapi-key3")
     assert candidates[-1] == "nvapi-key2"
+
+
+@pytest.mark.asyncio
+async def test_first_available_strategy(monkeypatch, key_manager):
+    monkeypatch.setattr(settings, "NVIDIA_NIM_API_KEYS", "nvapi-key1, nvapi-key2, nvapi-key3")
+    monkeypatch.setattr(settings, "NVIDIA_NIM_KEY_STRATEGY", "first")
+
+    k1 = await key_manager.get_next_key()
+    k2 = await key_manager.get_next_key()
+    assert k1 == "nvapi-key1"
+    assert k2 == "nvapi-key1"
+
+    # Passivate key1, should now pick key2
+    await key_manager.mark_passive("nvapi-key1", cooldown_seconds=60.0)
+    k3 = await key_manager.get_next_key()
+    assert k3 == "nvapi-key2"
+

@@ -6,6 +6,8 @@ import uuid
 from collections.abc import AsyncGenerator, AsyncIterable
 from typing import Any
 
+from loguru import logger
+
 from atomic.guards.subagent import SubagentGuard
 from atomic.parsers.heuristic_tool import (
     HeuristicToolStatefulParser,
@@ -323,11 +325,13 @@ class StreamEngine:
         tools: list[dict[str, Any]] | None = None,
         session_id: str | None = None,
         is_stop_hook: bool = False,
+        is_evaluator: bool = False,
     ):
         self.target_model = target_model
         self.tools = tools
         self.session_id = session_id
-        self.is_stop_hook = is_stop_hook
+        self.is_evaluator = is_evaluator
+        self.is_stop_hook = is_stop_hook or is_evaluator
         self.message_id = f"msg_{uuid.uuid4().hex[:10]}"
         self.session = session_manager.get_or_create_session(session_id)
 
@@ -462,8 +466,17 @@ class StreamEngine:
                     {"choices": [{"delta": {"reasoning_content": reasoning}}]}
                 )
                 for ev in events:
-                    if hasattr(ev, "delta") and getattr(ev.delta, "type", None) == "thinking_delta":
-                        self.accumulated_thinking.append(getattr(ev.delta, "thinking", ""))
+                    ev_type = getattr(ev, "type", None)
+                    if ev_type == "content_block_start":
+                        cb_type = getattr(getattr(ev, "content_block", None), "type", None)
+                        self.current_block_type = cb_type
+                    elif ev_type == "content_block_stop":
+                        self.current_block_type = None
+
+                    if hasattr(ev, "delta"):
+                        dtype = getattr(ev.delta, "type", None)
+                        if dtype == "thinking_delta":
+                            self.accumulated_thinking.append(getattr(ev.delta, "thinking", ""))
                     yield ev.to_sse()
                 continue
 
@@ -485,7 +498,7 @@ class StreamEngine:
 
                         for close_ev in self.thinking_parser.close_active_block():
                             yield close_ev.to_sse()
-
+                        self.current_block_type = None
 
                         active_id = tc_id or f"toolu_{uuid.uuid4().hex[:10]}"
                         active_name = tc_name or ""
@@ -497,21 +510,23 @@ class StreamEngine:
                             "tool_id": active_id,
                             "tool_name": active_name,
                             "args": [],
-                            "started": True,
+                            "started": False,
                             "stopped": False,
+                            "streamed": False,
                         }
-                        yield AnthropicSSEFormatter.tool_use_start(blk_idx, active_id, active_name)
-                    else:
-                        st = self.tool_state_map[tc_index]
-                        if tc_id and not st["tool_id"]:
-                            st["tool_id"] = tc_id
-                        if tc_name and not st["tool_name"]:
-                            st["tool_name"] = tc_name
 
                     st = self.tool_state_map[tc_index]
+                    if tc_id and not st["tool_id"]:
+                        st["tool_id"] = tc_id
+                    if tc_name and not st["tool_name"]:
+                        st["tool_name"] = tc_name
+
+                    if not st["started"] and st["tool_name"]:
+                        yield AnthropicSSEFormatter.tool_use_start(st["block_index"], st["tool_id"], st["tool_name"])
+                        st["started"] = True
+
                     if tc_args:
                         st["args"].append(tc_args)
-                        yield AnthropicSSEFormatter.input_json_delta(tc_args, st["block_index"])
 
                 finish_reason = "tool_calls"
                 continue
@@ -564,22 +579,6 @@ class StreamEngine:
                         yield ev.to_sse()
 
                 if clean_text:
-                    if self.accumulated_thinking:
-                        full_think = "".join(self.accumulated_thinking).strip()
-                        c_strip = clean_text.strip()
-                        if len(c_strip) >= 15 and (c_strip in full_think or full_think.endswith(c_strip)):
-                            clean_text = ""
-                        elif clean_text and "\n" in clean_text:
-                            lines = clean_text.splitlines(keepends=True)
-                            filtered_lines = []
-                            for line in lines:
-                                l_str = line.strip()
-                                if len(l_str) >= 15 and (l_str in full_think or full_think.endswith(l_str)):
-                                    continue
-                                filtered_lines.append(line)
-                            clean_text = "".join(filtered_lines)
-
-                if clean_text:
                     tool_events, remaining_text = await self.heuristic_tool_parser.process_chunk_pipeline(clean_text)
                     if tool_events:
                         for ev in tool_events:
@@ -612,37 +611,55 @@ class StreamEngine:
                             yield ev.to_sse()
 
                     if remaining_text:
-                        if self.current_block_type != "text":
-                            if self.current_block_type is not None:
-                                yield AnthropicSSEFormatter.block_stop(self._get_current_index())
-                            idx = self._next_block_index()
-                            yield AnthropicSSEFormatter.text_start(idx)
-                            self.current_block_type = "text"
-
                         self.accumulated_text.append(remaining_text)
-                        self.text_or_tool_emitted = True
-                        if remaining_text.strip():
-                            import asyncio
+                        if not self.is_stop_hook:
+                            if self.current_block_type != "text":
+                                if self.current_block_type is not None:
+                                    yield AnthropicSSEFormatter.block_stop(self._get_current_index())
+                                    self.current_block_type = None
 
-                            from bot.live_bridge import live_bridge_manager
+                                for close_ev in self.thinking_parser.close_active_block():
+                                    yield close_ev.to_sse()
 
-                            asyncio.create_task(
-                                live_bridge_manager.dispatch_text_chunk(self.session.session_id, remaining_text)
-                            )
-                        yield AnthropicSSEFormatter.text_delta(remaining_text, self._get_current_index())
+                                idx = self._next_block_index()
+                                yield AnthropicSSEFormatter.text_start(idx)
+                                self.current_block_type = "text"
+
+                            self.text_or_tool_emitted = True
+                            if remaining_text.strip():
+                                import asyncio
+
+                                from bot.live_bridge import live_bridge_manager
+
+                                asyncio.create_task(
+                                    live_bridge_manager.dispatch_text_chunk(self.session.session_id, remaining_text)
+                                )
+                            yield AnthropicSSEFormatter.text_delta(remaining_text, self._get_current_index())
+                        else:
+                            self.text_or_tool_emitted = True
 
         if self.initial_pre_think_buffer:
             clean_text = self.initial_pre_think_buffer
             self.initial_pre_think_buffer = ""
-            if self.current_block_type != "text":
-                idx = self._next_block_index()
-                yield AnthropicSSEFormatter.text_start(idx)
-                self.current_block_type = "text"
-            yield AnthropicSSEFormatter.text_delta(clean_text, self._get_current_index())
             self.accumulated_text.append(clean_text)
+            if not self.is_stop_hook:
+                if self.current_block_type != "text":
+                    idx = self._next_block_index()
+                    yield AnthropicSSEFormatter.text_start(idx)
+                    self.current_block_type = "text"
+                yield AnthropicSSEFormatter.text_delta(clean_text, self._get_current_index())
+            else:
+                self.text_or_tool_emitted = True
 
         # Flush Thinking Parser
         for flush_ev in await self.thinking_parser.flush():
+            ev_type = getattr(flush_ev, "type", None)
+            if ev_type == "content_block_start":
+                cb_type = getattr(getattr(flush_ev, "content_block", None), "type", None)
+                self.current_block_type = cb_type
+            elif ev_type == "content_block_stop":
+                self.current_block_type = None
+
             if hasattr(flush_ev, "delta"):
                 dtype = getattr(flush_ev.delta, "type", None)
                 if dtype == "thinking_delta":
@@ -665,8 +682,32 @@ class StreamEngine:
 
         # Flush Heuristic Tool Parser
         for flush_ev in await self.heuristic_tool_parser.flush():
+            ev_type = getattr(flush_ev, "type", None)
+            if ev_type == "content_block_start":
+                cb_type = getattr(getattr(flush_ev, "content_block", None), "type", None)
+                self.current_block_type = cb_type
+            elif ev_type == "content_block_stop":
+                self.current_block_type = None
+
             if hasattr(flush_ev, "content_block") and getattr(flush_ev.content_block, "type", None) == "tool_use":
                 self.text_or_tool_emitted = True
+                cb = flush_ev.content_block
+                self._current_heuristic_tc = {
+                    "type": "tool_use",
+                    "id": getattr(cb, "id", f"toolu_{uuid.uuid4().hex[:10]}"),
+                    "name": getattr(cb, "name", ""),
+                    "input": {},
+                }
+            elif hasattr(flush_ev, "delta") and getattr(flush_ev.delta, "type", None) == "input_json_delta":
+                partial_json = getattr(flush_ev.delta, "partial_json", "")
+                if getattr(self, "_current_heuristic_tc", None):
+                    try:
+                        self._current_heuristic_tc["input"] = json.loads(partial_json)
+                    except Exception:
+                        self._current_heuristic_tc["input"] = {}
+                    if self._current_heuristic_tc["name"]:
+                        self.accumulated_tool_calls.append(self._current_heuristic_tc)
+                    self._current_heuristic_tc = None
             yield flush_ev.to_sse()
 
         # Stop active text/thinking block if open
@@ -676,9 +717,11 @@ class StreamEngine:
 
         # Finalize and stop active native tool call blocks per tc_index
         for _tc_idx, st in sorted(self.tool_state_map.items()):
-            if not st["stopped"]:
-                yield AnthropicSSEFormatter.block_stop(st["block_index"])
-                st["stopped"] = True
+            if not st.get("started"):
+                yield AnthropicSSEFormatter.tool_use_start(
+                    st["block_index"], st["tool_id"] or f"toolu_{uuid.uuid4().hex[:10]}", st["tool_name"] or "bash"
+                )
+                st["started"] = True
 
             full_args_str = "".join(st["args"])
             from atomic.parsers.auto_close_tag import AutoCloseTagParser
@@ -687,13 +730,19 @@ class StreamEngine:
 
             if isinstance(parsed_args, dict):
                 tname_lower = st["tool_name"].lower()
-                if "ok" in parsed_args or any(k in tname_lower for k in ("exit_session", "stop_hook", "save_session_summary", "evaluator", "goal")):
+                is_stop_hook_tool = self.is_stop_hook or self.is_evaluator or any(k in tname_lower for k in ("exit_session", "stop_hook", "save_session_summary", "evaluator", "goal_evaluator"))
+                if is_stop_hook_tool and ("ok" in parsed_args or any(k in tname_lower for k in ("exit_session", "stop_hook", "evaluator", "goal"))):
                     from core.interceptor.json_repair import JSONRepairNormalizer
-                    parsed_args = await JSONRepairNormalizer.normalize_stop_hook_schema(parsed_args)
+                    parsed_args = await JSONRepairNormalizer.normalize_stop_hook_schema(parsed_args, is_evaluator=self.is_evaluator)
 
                 parsed_args = await self.subagent_guard.enforce_tool_call(st["tool_name"], parsed_args)
                 from atomic.guards.file_edit_guard import file_edit_guard
                 parsed_args = file_edit_guard.sanitize_tool_input(st["tool_name"], parsed_args)
+
+            if not st["stopped"]:
+                yield AnthropicSSEFormatter.input_json_delta(json.dumps(parsed_args), st["block_index"])
+                yield AnthropicSSEFormatter.block_stop(st["block_index"])
+                st["stopped"] = True
 
             self.accumulated_tool_calls.append(
                 {
@@ -718,9 +767,12 @@ class StreamEngine:
                 for tool in extracted_tools:
                     tname_lower = tool.get("name", "").lower()
                     if isinstance(tool.get("input"), dict):
-                        if "ok" in tool["input"] or any(k in tname_lower for k in ("exit_session", "stop_hook", "save_session_summary", "evaluator", "goal")):
-                            from core.interceptor.json_repair import JSONRepairNormalizer
-                            tool["input"] = await JSONRepairNormalizer.normalize_stop_hook_schema(tool["input"])
+                        is_stop_hook_tool = self.is_stop_hook or self.is_evaluator or any(k in tname_lower for k in ("exit_session", "stop_hook", "save_session_summary", "evaluator", "goal_evaluator"))
+                        if is_stop_hook_tool and ("ok" in tool["input"] or any(k in tname_lower for k in ("exit_session", "stop_hook", "evaluator", "goal"))):
+                            from core.interceptor.json_repair import (
+                                JSONRepairNormalizer,
+                            )
+                            tool["input"] = await JSONRepairNormalizer.normalize_stop_hook_schema(tool["input"], is_evaluator=self.is_evaluator)
 
                     tool["input"] = await self.subagent_guard.enforce_tool_call(tool["name"], tool.get("input", {}))
                     from atomic.guards.file_edit_guard import file_edit_guard
@@ -747,28 +799,121 @@ class StreamEngine:
 
         # --- ASYNCHRONOUS SAFETY NET (PREEMPTIVE / FALLBACK INJECTION) ---
         # If no text content and no tool calls were emitted throughout the entire stream,
-        # inject accumulated thinking text as text_delta (or space if no thinking) so Claude Code CLI gets the result!
+        # check if thinking text contained embedded tool calls, or emit thinking as text so Claude Code CLI gets the result!
         if not self.text_or_tool_emitted:
             full_think_text = "".join(self.accumulated_thinking).strip()
-            fallback_text = full_think_text if full_think_text else " "
-            if "```" in fallback_text or "{" in fallback_text:
-                from core.interceptor.json_repair import JSONRepairNormalizer
-                fallback_text = await JSONRepairNormalizer.process_text(fallback_text, is_stop_hook=self.is_stop_hook)
+            
+            # 1. Attempt extracting embedded JSON or XML tool calls from thinking text
+            if full_think_text:
+                _rem, extracted_tools = extract_all_json_tool_calls(full_think_text, allowed_tools=self.tools)
+                if extracted_tools:
+                    for tool in extracted_tools:
+                        tname_lower = tool.get("name", "").lower()
+                        if isinstance(tool.get("input"), dict) and (
+                            "ok" in tool["input"]
+                            or any(
+                                k in tname_lower
+                                for k in ("exit_session", "stop_hook", "save_session_summary", "evaluator", "goal")
+                            )
+                        ):
+                            from core.interceptor.json_repair import (
+                                JSONRepairNormalizer,
+                            )
 
-            idx = self._next_block_index()
-            yield AnthropicSSEFormatter.text_start(idx)
-            yield AnthropicSSEFormatter.text_delta(fallback_text, idx)
-            yield AnthropicSSEFormatter.block_stop(idx)
-            self.text_or_tool_emitted = True
-            self.accumulated_text.append(fallback_text)
+                            tool["input"] = await JSONRepairNormalizer.normalize_stop_hook_schema(tool["input"])
 
-        # Normalize Stop Hook responses if target flag is active
-        if self.is_stop_hook and self.accumulated_text:
+                        tool["input"] = await self.subagent_guard.enforce_tool_call(tool["name"], tool.get("input", {}))
+                        from atomic.guards.file_edit_guard import file_edit_guard
+                        tool["input"] = file_edit_guard.sanitize_tool_input(tool["name"], tool.get("input", {}))
+                        
+                        idx = self._next_block_index()
+                        yield AnthropicSSEFormatter.tool_use_start(idx, tool["id"], tool["name"])
+                        yield AnthropicSSEFormatter.input_json_delta(json.dumps(tool["input"]), idx)
+                        yield AnthropicSSEFormatter.block_stop(idx)
+                        self.accumulated_tool_calls.append(tool)
+                    
+                    stop_reason = "tool_use"
+                    self.text_or_tool_emitted = True
+
+            # 2. If still no text or tool emitted, attempt action continuation from thinking plan!
+            if not self.text_or_tool_emitted and full_think_text and not self.is_stop_hook and self.tools:
+                logger.info("StreamEngine: Model completed reasoning without action. Triggering Action Continuation...")
+                async for event in self._attempt_action_continuation(full_think_text):
+                    yield event
+                if bool(self.accumulated_tool_calls):
+                    stop_reason = "tool_use"
+                    self.text_or_tool_emitted = True
+
+            # 3. If still no text or tool emitted, output minimal space (never fake error text!)
+            if not self.text_or_tool_emitted and not self.is_stop_hook:
+                fallback_text = " "
+                idx = self._next_block_index()
+                yield AnthropicSSEFormatter.text_start(idx)
+                yield AnthropicSSEFormatter.text_delta(fallback_text, idx)
+                yield AnthropicSSEFormatter.block_stop(idx)
+                self.text_or_tool_emitted = True
+                self.accumulated_text.append(fallback_text)
+
+        # Normalize and emit Stop Hook responses atomically if target flag is active
+        if self.is_stop_hook:
             full_stop_text = "".join(self.accumulated_text).strip()
+            from core.interceptor.json_repair import JSONRepairNormalizer
+
+            if not full_stop_text and self.accumulated_thinking:
+                full_think_text = "".join(self.accumulated_thinking).strip()
+                sanitized_think = await JSONRepairNormalizer.sanitize_markdown_json(full_think_text)
+                repaired_think = await JSONRepairNormalizer.heuristic_repair_json(sanitized_think)
+                if isinstance(repaired_think, dict):
+                    normalized_dict = await JSONRepairNormalizer.normalize_stop_hook_schema(
+                        repaired_think, is_evaluator=self.is_evaluator
+                    )
+                    full_stop_text = json.dumps(normalized_dict, ensure_ascii=False)
+                else:
+                    if self.is_evaluator:
+                        cond_met = any(kw in full_think_text.lower() for kw in ("condition is satisfied", "condition met", "goal completed", "all operations completed", "ok: true", '"ok": true'))
+                        reason = full_think_text[-300:].replace("\n", " ").strip()
+                        full_stop_text = json.dumps({"ok": cond_met, "reason": reason})
+                    else:
+                        full_stop_text = json.dumps({
+                            "summary": full_think_text[-250:].replace("\n", " ").strip(),
+                            "memory": "",
+                            "stop_hook_active": False,
+                        })
+
             if full_stop_text:
-                from core.interceptor.json_repair import JSONRepairNormalizer
-                normalized_stop_text = await JSONRepairNormalizer.process_text(full_stop_text, is_stop_hook=True)
-                self.accumulated_text = [normalized_stop_text]
+                normalized_stop_text = await JSONRepairNormalizer.process_text(
+                    full_stop_text, is_stop_hook=True, is_evaluator=self.is_evaluator
+                )
+            else:
+                if self.is_evaluator:
+                    fallback_dict = {"ok": False, "reason": "Goal loop ended."}
+                else:
+                    fallback_dict = {
+                        "summary": "Goal completed.",
+                        "memory": "",
+                        "stop_hook_active": False,
+                    }
+                normalized_stop_text = json.dumps(fallback_dict, ensure_ascii=False)
+
+            self.accumulated_text = [normalized_stop_text]
+
+            # Emit clean, fully formed JSON as a single text block
+            if self.current_block_type != "text":
+                if self.current_block_type is not None:
+                    yield AnthropicSSEFormatter.block_stop(self._get_current_index())
+                    self.current_block_type = None
+
+                for close_ev in self.thinking_parser.close_active_block():
+                    yield close_ev.to_sse()
+
+                idx = self._next_block_index()
+                yield AnthropicSSEFormatter.text_start(idx)
+                self.current_block_type = "text"
+
+            yield AnthropicSSEFormatter.text_delta(normalized_stop_text, self._get_current_index())
+            yield AnthropicSSEFormatter.block_stop(self._get_current_index())
+            self.current_block_type = None
+            self.text_or_tool_emitted = True
 
         self.final_stop_reason = stop_reason
         self.final_usage = {"input_tokens": input_tokens, "output_tokens": output_tokens}
@@ -778,12 +923,96 @@ class StreamEngine:
         yield AnthropicSSEFormatter.message_delta(stop_reason=stop_reason, output_tokens=output_tokens)
         yield AnthropicSSEFormatter.message_stop()
 
+    async def _attempt_action_continuation(self, plan_text: str) -> AsyncGenerator[str, None]:
+        """When model completed reasoning without emitting a tool or text,
+        automatically execute action continuation using an agile agentic tool caller.
+        """
+        try:
+            from config import settings
+            from providers.openai import OpenAICompatibleProvider
+
+            continuation_model = getattr(
+                settings, "MODEL_SONNET", "nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b"
+            )
+            provider = OpenAICompatibleProvider()
+
+            continuation_messages = [
+                {
+                    "role": "system",
+                    "content": "You are Claude Code CLI assistant. You must immediately execute the necessary tool call for the planned actions.",
+                },
+                {
+                    "role": "user",
+                    "content": f"You have planned the following actions in your reasoning:\n{plan_text}\n\nExecute the first tool call now without any conversational text.",
+                },
+            ]
+
+            res = await provider.complete(
+                model=continuation_model,
+                messages=continuation_messages,
+                tools=self.tools,
+                stream=False,
+                temperature=0.2,
+                max_tokens=2048,
+            )
+            if isinstance(res, tuple):
+                res_body = res[0]
+            else:
+                res_body = res
+
+            choices = res_body.get("choices", [{}])
+            msg = choices[0].get("message", {}) if choices else {}
+            tc_list = msg.get("tool_calls") or []
+
+            if tc_list:
+                for tc in tc_list:
+                    func = tc.get("function", {})
+                    t_name = func.get("name", "")
+                    raw_args = func.get("arguments", "{}")
+                    try:
+                        parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except Exception:
+                        parsed_args = {}
+
+                    from atomic.guards.file_edit_guard import file_edit_guard
+                    sanitized_args = file_edit_guard.sanitize_tool_input(t_name, parsed_args)
+                    tool_id = tc.get("id") or f"toolu_{uuid.uuid4().hex[:10]}"
+
+                    idx = self._next_block_index()
+                    yield AnthropicSSEFormatter.tool_use_start(idx, tool_id, t_name)
+                    yield AnthropicSSEFormatter.input_json_delta(json.dumps(sanitized_args), idx)
+                    yield AnthropicSSEFormatter.block_stop(idx)
+
+                    self.accumulated_tool_calls.append({"id": tool_id, "name": t_name, "input": sanitized_args})
+
+                    import asyncio
+
+                    from bot.live_bridge import live_bridge_manager
+                    asyncio.create_task(live_bridge_manager.dispatch_tool_call(self.session.session_id, t_name, sanitized_args))
+
+                self.text_or_tool_emitted = True
+            elif msg.get("content"):
+                c_text = msg["content"].strip()
+                if c_text:
+                    idx = self._next_block_index()
+                    yield AnthropicSSEFormatter.text_start(idx)
+                    yield AnthropicSSEFormatter.text_delta(c_text, idx)
+                    yield AnthropicSSEFormatter.block_stop(idx)
+                    self.text_or_tool_emitted = True
+                    self.accumulated_text.append(c_text)
+        except Exception as e:
+            logger.warning("StreamEngine: Action continuation attempt failed: %s", e)
+
     async def stream_response(
         self, upstream_stream: AsyncIterable[dict[str, Any] | str | bytes]
     ) -> AsyncGenerator[str, None]:
         """Async generator yielding Anthropic SSE event strings on-the-fly."""
-        async for chunk in self.transform_stream(upstream_stream):
-            yield chunk
+        try:
+            async for chunk in self.transform_stream(upstream_stream):
+                yield chunk
+        finally:
+            from bot.live_bridge import live_bridge_manager
+            live_bridge_manager.finalize_session_stream(self.session.session_id)
 
     async def transform(
         self, upstream_stream: AsyncIterable[dict[str, Any] | str | bytes]

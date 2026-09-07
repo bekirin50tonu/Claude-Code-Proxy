@@ -90,6 +90,9 @@ class JSONRepairNormalizer:
             "a session-scoped stop hook is now active",
             "goal evaluator",
             "evaluate goal",
+            "evaluating a stop-condition hook",
+            "stopping condition",
+            "has the following stopping condition been satisfied",
         )
         has_user_stop_hook_msg = any(pat in user_text_lower for pat in stop_hook_patterns)
 
@@ -97,6 +100,51 @@ class JSONRepairNormalizer:
             return has_user_stop_hook_msg
 
         return has_stop_hook_tool or has_user_stop_hook_msg
+
+    @classmethod
+    def is_evaluator_hook_target(cls, payload: dict[str, Any] | None) -> bool:
+        """Detect specifically if request is a Claude Code stop-condition evaluator hook."""
+        if not payload or not isinstance(payload, dict):
+            return False
+
+        # 1. Inspect system prompt
+        system = payload.get("system", "")
+        system_str = ""
+        if isinstance(system, str):
+            system_str = system
+        elif isinstance(system, list):
+            system_str = " ".join(str(b.get("text", "")) for b in system if isinstance(b, dict))
+
+        eval_keywords = (
+            "evaluating a stop-condition hook",
+            "stopping condition",
+            "has the following stopping condition been satisfied",
+        )
+        if any(kw in system_str.lower() for kw in eval_keywords):
+            return True
+
+        # 2. Inspect user messages
+        messages = payload.get("messages", [])
+        if isinstance(messages, list):
+            for msg in reversed(messages[-3:]):
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    c = msg.get("content")
+                    c_str = ""
+                    if isinstance(c, str):
+                        c_str = c
+                    elif isinstance(c, list):
+                        c_str = " ".join(str(b.get("text", "")) for b in c if isinstance(b, dict))
+                    if any(kw in c_str.lower() for kw in eval_keywords):
+                        return True
+
+        # 3. Check output_config for Claude Code evaluator schema
+        output_config = payload.get("output_config")
+        if isinstance(output_config, dict):
+            props = output_config.get("format", {}).get("schema", {}).get("properties", {})
+            if "ok" in props and "reason" in props:
+                return True
+
+        return False
 
     @classmethod
     def fix_angle_brackets(cls, text: str) -> str:
@@ -129,6 +177,14 @@ class JSONRepairNormalizer:
             cleaned = re.sub(r"^```(?:json|JSON)?\s*", "", cleaned, flags=re.IGNORECASE)
             cleaned = re.sub(r"\s*```$", "", cleaned)
             cleaned = cleaned.strip()
+
+        # Auto-repair missing opening brace `{` if text starts directly with JSON key
+        trimmed = cleaned.strip()
+        if not trimmed.startswith("{") and not trimmed.startswith("["):
+            if trimmed.endswith("}") or re.match(r'^["\']?(?:ok|reason|summary|stop_hook|memory|impossible)["\']?\s*:', trimmed, re.IGNORECASE):
+                cleaned = "{" + cleaned
+                if not cleaned.endswith("}"):
+                    cleaned = cleaned + "}"
 
         # Isolate JSON object bounds {...} or array bounds [...]
         start_obj = cleaned.find("{")
@@ -223,25 +279,63 @@ class JSONRepairNormalizer:
         return None
 
     @classmethod
-    async def normalize_stop_hook_schema(cls, data: Any) -> dict[str, Any]:
+    async def normalize_stop_hook_schema(cls, data: Any, is_evaluator: bool = False) -> dict[str, Any]:
         """Normalize JSON schema for Claude Code Stop Hook canonical requirements."""
         result_dict: dict[str, Any] = {}
 
+        is_eval = is_evaluator
         if isinstance(data, dict):
-            # Check if this is a Stop Hook Evaluator response schema {"ok": bool, "reason": str}
-            if "ok" in data:
-                raw_ok = data["ok"]
-                ok_bool = raw_ok if isinstance(raw_ok, bool) else (str(raw_ok).lower() in ("true", "1", "yes"))
-                res: dict[str, Any] = {
-                    "ok": ok_bool,
-                    "reason": str(data.get("reason", "")),
-                }
+            if "ok" in data or "impossible" in data:
+                is_eval = True
+            elif is_evaluator or any(k in data for k in ("should_stop", "stop_reason", "condition_met")):
+                is_eval = is_evaluator
+
+        if is_eval:
+            # Claude Code Evaluator Hook schema strictly requires:
+            # {"ok": bool, "reason": str} and optional {"impossible": bool}.
+            # No forbidden additional properties allowed (additionalProperties: false).
+            ok_val = False
+            reason_val = ""
+            impossible_val = None
+
+            if isinstance(data, dict):
+                if "ok" in data:
+                    raw_ok = data["ok"]
+                    ok_val = raw_ok if isinstance(raw_ok, bool) else (str(raw_ok).lower() in ("true", "1", "yes"))
+                elif "stop_hook_active" in data:
+                    # If goal is still active, stopping condition is NOT satisfied -> ok=False
+                    ok_val = not (data["stop_hook_active"] is True or str(data["stop_hook_active"]).lower() in ("true", "1", "yes"))
+                elif "should_stop" in data:
+                    raw_s = data["should_stop"]
+                    ok_val = raw_s if isinstance(raw_s, bool) else (str(raw_s).lower() in ("true", "1", "yes"))
+
+                if "reason" in data and data["reason"]:
+                    reason_val = str(data["reason"])
+                elif "summary" in data and data["summary"]:
+                    reason_val = str(data["summary"])
+                else:
+                    reason_val = "Stopping condition evaluated."
+
                 if "impossible" in data:
                     raw_imp = data["impossible"]
-                    imp_bool = raw_imp if isinstance(raw_imp, bool) else (str(raw_imp).lower() in ("true", "1", "yes"))
-                    res["impossible"] = imp_bool
-                return res
-            # Normalize key aliases for traditional stop hook schemas
+                    impossible_val = raw_imp if isinstance(raw_imp, bool) else (str(raw_imp).lower() in ("true", "1", "yes"))
+            elif isinstance(data, str):
+                reason_val = data
+                ok_val = False
+            else:
+                reason_val = "Condition evaluated."
+                ok_val = False
+
+            res: dict[str, Any] = {
+                "ok": ok_val,
+                "reason": reason_val,
+            }
+            if impossible_val is not None:
+                res["impossible"] = impossible_val
+            return res
+
+        # Traditional / Legacy Stop Hook Schema {"summary": ..., "memory": ..., "stop_hook_active": ...}
+        if isinstance(data, dict):
             for k, v in data.items():
                 canonical_key = cls.KEY_ALIASES.get(k.lower(), k)
                 result_dict[canonical_key] = v
@@ -284,7 +378,7 @@ class JSONRepairNormalizer:
         return DeDuplicator.deduplicate(content_list)
 
     @classmethod
-    async def process_text(cls, text: str, is_stop_hook: bool = False) -> str:
+    async def process_text(cls, text: str, is_stop_hook: bool = False, is_evaluator: bool = False) -> str:
         """Complete pipeline: sanitize markdown -> repair JSON -> normalize schema -> serialize."""
         if not text or not isinstance(text, str):
             return text
@@ -292,14 +386,16 @@ class JSONRepairNormalizer:
         sanitized = await cls.sanitize_markdown_json(text)
         repaired_data = await cls.heuristic_repair_json(sanitized)
 
-        is_evaluator_or_stop_hook = is_stop_hook
+        is_evaluator_or_stop_hook = is_stop_hook or is_evaluator
         if isinstance(repaired_data, dict):
             if "ok" in repaired_data or any(k.lower() in ("summary", "memory", "memories", "session_summary", "stop_hook_active", "should_stop") for k in repaired_data):
                 is_evaluator_or_stop_hook = True
+                if "ok" in repaired_data:
+                    is_evaluator = True
 
         if is_evaluator_or_stop_hook:
             target_input = repaired_data if repaired_data is not None else text
-            normalized_dict = await cls.normalize_stop_hook_schema(target_input)
+            normalized_dict = await cls.normalize_stop_hook_schema(target_input, is_evaluator=is_evaluator)
             return json.dumps(normalized_dict, ensure_ascii=False)
 
         return text
@@ -310,6 +406,7 @@ class JSONRepairNormalizer:
         data: dict[str, Any],
         subagents_enabled: bool | None = None,
         is_stop_hook: bool = False,
+        is_evaluator: bool = False,
     ) -> dict[str, Any]:
         """Process Anthropic message response dict for Stop Hook repair & tool deduplication."""
         if not isinstance(data, dict):
@@ -330,17 +427,17 @@ class JSONRepairNormalizer:
                 if isinstance(block, dict):
                     if block.get("type") == "text" and "text" in block:
                         raw_text = block["text"]
-                        if is_stop_hook:
-                            block["text"] = await cls.process_text(raw_text, is_stop_hook=True)
+                        if is_stop_hook or is_evaluator:
+                            block["text"] = await cls.process_text(raw_text, is_stop_hook=is_stop_hook, is_evaluator=is_evaluator)
                         elif "```json" in raw_text.lower():
-                            block["text"] = await cls.process_text(raw_text, is_stop_hook=False)
+                            block["text"] = await cls.process_text(raw_text, is_stop_hook=False, is_evaluator=False)
                     elif block.get("type") == "tool_use":
                         tname = block.get("name", "")
                         tname_lower = tname.lower()
                         if "input" in block and isinstance(block["input"], dict):
                             inp = block["input"]
-                            if is_stop_hook or "ok" in inp or any(k in tname_lower for k in ("exit_session", "stop_hook", "save_session_summary", "evaluator", "goal")):
-                                inp = await cls.normalize_stop_hook_schema(inp)
+                            if is_stop_hook or is_evaluator or "ok" in inp or any(k in tname_lower for k in ("exit_session", "stop_hook", "save_session_summary", "evaluator", "goal")):
+                                inp = await cls.normalize_stop_hook_schema(inp, is_evaluator=is_evaluator)
 
                             from atomic.guards.subagent import subagent_guard
                             block["input"] = await subagent_guard.enforce_tool_call(tname, inp, enabled=subagents_enabled)
@@ -371,15 +468,29 @@ class JSONRepairMiddleware:
             if message["type"] == "http.response.start":
                 status_code = message["status"]
                 response_headers = message.get("headers", [])
-                is_stream = any(k.lower() == b"content-type" and b"text/event-stream" in v.lower() for k, v in response_headers)
-                if is_stream:
+                is_json = any(
+                    k.lower() == b"content-type" and b"application/json" in v.lower()
+                    for k, v in response_headers
+                )
+                is_stream = any(
+                    k.lower() == b"content-type" and b"text/event-stream" in v.lower()
+                    for k, v in response_headers
+                )
+                if not is_json or is_stream or status_code != 200:
                     await send(message)
                     return
             elif message["type"] == "http.response.body":
                 body_chunk = message.get("body", b"")
-                is_stream = any(k.lower() == b"content-type" and b"text/event-stream" in v.lower() for k, v in response_headers)
+                is_json = any(
+                    k.lower() == b"content-type" and b"application/json" in v.lower()
+                    for k, v in response_headers
+                )
+                is_stream = any(
+                    k.lower() == b"content-type" and b"text/event-stream" in v.lower()
+                    for k, v in response_headers
+                )
 
-                if is_stream:
+                if not is_json or is_stream or status_code != 200:
                     await send(message)
                     return
 

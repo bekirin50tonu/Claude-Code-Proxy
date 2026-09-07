@@ -116,6 +116,7 @@ def get_key_statuses() -> dict[str, str]:
     managed_keys = [
         "NVIDIA_NIM_API_KEYS",
         "NVIDIA_NIM_API_KEY",
+        "NVIDIA_NIM_KEY_STRATEGY",
         "OPENROUTER_API_KEY",
         "TOKENROUTER_API_KEY",
         "GATEWAY_AUTH_TOKEN",
@@ -293,6 +294,7 @@ async def get_config() -> JSONResponse:
     config_data = {
         "NVIDIA_NIM_API_KEY": nim_key_val,
         "NVIDIA_NIM_API_KEYS": nim_key_val,
+        "NVIDIA_NIM_KEY_STRATEGY": getattr(settings, "NVIDIA_NIM_KEY_STRATEGY", "round_robin"),
         "OPENROUTER_API_KEY": settings.OPENROUTER_API_KEY,
         "TOKENROUTER_API_KEY": settings.TOKENROUTER_API_KEY,
         "GATEWAY_AUTH_TOKEN": settings.GATEWAY_AUTH_TOKEN,
@@ -956,6 +958,7 @@ async def get_dev_metrics() -> JSONResponse:
                 "total_keys": len(keys),
                 "active_keys": len(active_keys),
                 "passive_keys": len(passive_keys),
+                "strategy": getattr(settings, "NVIDIA_NIM_KEY_STRATEGY", "round_robin"),
                 "key_details": key_details,
             },
             "throttle_telemetry": {

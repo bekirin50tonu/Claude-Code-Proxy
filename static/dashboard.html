@@ -579,6 +579,16 @@
                         </div>
                         <div class="form-group">
                             <div class="label-row">
+                                <label for="NVIDIA_NIM_KEY_STRATEGY">NVIDIA NIM Key Selection Strategy</label>
+                                <span id="badge-NVIDIA_NIM_KEY_STRATEGY" class="badge-status">...</span>
+                            </div>
+                            <select id="NVIDIA_NIM_KEY_STRATEGY" style="width: 100%; background: #050608; border: 1px solid var(--border-subtle); color: white; border-radius: 6px; padding: 0.65rem 0.85rem; font-size: 0.85rem; outline: none;">
+                                <option value="round_robin">Round Robin (Load Balanced / Alternating)</option>
+                                <option value="first">First Available (Waterfall / Primary Key First)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <div class="label-row">
                                 <label for="OPENROUTER_API_KEY">OpenRouter API Key</label>
                                 <span id="badge-OPENROUTER_API_KEY" class="badge-status">...</span>
                             </div>

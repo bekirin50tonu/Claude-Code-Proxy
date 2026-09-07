@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Claude Code CLI wrapper pointing to local proxy gateway
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8090"
+export ANTHROPIC_AUTH_TOKEN="${GATEWAY_AUTH_TOKEN:-local-proxy-token}"
+exec claude "$@"

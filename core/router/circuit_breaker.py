@@ -80,6 +80,7 @@ class CircuitBreaker:
             self._reset_internal(save=save)
 
     def _reset_internal(self, save: bool = True) -> None:
+        was_open = self._state == CircuitState.OPEN
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self.started_at = None
@@ -94,6 +95,10 @@ class CircuitBreaker:
         daily_request_tracker.reset_provider(provider)
         if save:
             self._get_registry().save_to_file()
+        # ponytail: only emit close event when transitioning, not on every
+        # successful response while already CLOSED (avoids notification spam).
+        if was_open:
+            self._get_registry().notify_close(self.model_id)
 
     async def trip_or_extend(self, reason: str = "Manually forced OPEN via Dashboard", save: bool = True) -> float:
         """Trip circuit breaker into OPEN state or extend timeout step-wise."""
@@ -215,14 +220,20 @@ class CircuitBreakerRegistry:
         if callback not in self._trip_callbacks:
             self._trip_callbacks.append(callback)
 
-    def notify_trip(self, model_id: str, reason: str) -> None:
-        """Dispatch trip event to all registered listeners."""
+    def register_close_callback(self, callback: object) -> None:
+        """Register a callback invoked when a circuit breaker transitions back to CLOSED."""
+        if not hasattr(self, "_close_callbacks"):
+            self._close_callbacks: list[object] = []
+        if callback not in self._close_callbacks:
+            self._close_callbacks.append(callback)
+
+    def _dispatch(self, callbacks: list[object], *args: object) -> None:
         if "PYTEST_CURRENT_TEST" in os.environ:
             return
-        for cb in self._trip_callbacks:
+        for cb in callbacks:
             try:
                 if callable(cb):
-                    res = cb(model_id, reason)
+                    res = cb(*args)
                     if asyncio.iscoroutine(res):
                         try:
                             loop = asyncio.get_running_loop()
@@ -231,6 +242,15 @@ class CircuitBreakerRegistry:
                             pass
             except Exception:
                 pass
+
+    def notify_trip(self, model_id: str, reason: str) -> None:
+        """Dispatch trip event to all registered listeners."""
+        self._dispatch(self._trip_callbacks, model_id, reason)
+
+    def notify_close(self, model_id: str) -> None:
+        """Dispatch close event to all registered listeners."""
+        callbacks = getattr(self, "_close_callbacks", None) or []
+        self._dispatch(callbacks, model_id)
 
     def get(self, model_id: str) -> CircuitBreaker:
         if model_id not in self._breakers:

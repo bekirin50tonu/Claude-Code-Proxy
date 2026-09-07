@@ -66,6 +66,30 @@ class TestLocalMockingShield:
         assert is_hk is False
         assert kind == ""
 
+    def test_tool_enabled_request_not_intercepted(self):
+        from api.mock import check_mock_request
+        payload = {
+            "model": "claude-3-5-sonnet",
+            "messages": [{"role": "user", "content": "Perform network probe analysis on system"}],
+            "tools": [{"name": "run_command", "description": "Run shell command"}],
+        }
+        is_hk, kind = LocalMockingShield.is_housekeeping_request(payload)
+        assert is_hk is False
+        assert kind == ""
+        assert check_mock_request(payload) is None
+
+    def test_large_prompt_with_network_probe_text_not_intercepted(self):
+        from api.mock import check_mock_request
+        long_code = "# network probes. Implements domain traits.\n" + "x = 1\n" * 100
+        payload = {
+            "model": "claude-3-5-sonnet",
+            "messages": [{"role": "user", "content": long_code}],
+        }
+        is_hk, kind = LocalMockingShield.is_housekeeping_request(payload)
+        assert is_hk is False
+        assert kind == ""
+        assert check_mock_request(payload) is None
+
     def test_generate_mock_response_pydantic_compliance(self):
         payload = {"model": "claude-3-5-sonnet"}
         mock = LocalMockingShield.generate_mock_response(payload, kind="title_generation")

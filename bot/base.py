@@ -29,7 +29,12 @@ class BaseBotAdapter(ABC):
         reason: str,
         fallback_model: str | None = None,
     ) -> None:
-        """Dispatch a proactive push notification alert when a Circuit Breaker trips OPEN."""
+        """Send proactive alert when a circuit breaker trips OPEN."""
+        pass
+
+    @abstractmethod
+    async def send_circuit_breaker_recovery(self, model_id: str) -> None:
+        """Send proactive alert when a circuit breaker recovers (CLOSED)."""
         pass
 
     @abstractmethod

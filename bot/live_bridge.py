@@ -159,7 +159,7 @@ class LiveBridgeManager:
                 full_thinking = full_thinking[:3400] + "\n...(reasoning truncated)"
 
             esc_thinking = escape_markdown_v2(full_thinking, is_code_block=False)
-            text = f"🧠 *Claude is thinking...*\n\n_{esc_thinking}_"
+            text = f"🧠 *Claude is thinking…*\n\n{esc_thinking}"
 
             from bot.factory import bot_factory
             tg_adapter = bot_factory.get_adapter("telegram")
@@ -439,10 +439,72 @@ class LiveBridgeManager:
             except Exception as e:
                 logger.warning(f"Failed to send diff report to {cid}: {e}")
 
-    def finalize_session_stream(self, session_id: str | None) -> None:
+    async def finalize_session_stream_async(
+        self, session_id: str, state: SessionLiveStreamState, error: str | None = None
+    ) -> None:
+        """Ensure Telegram thinking message is updated cleanly upon stream finalization."""
+        async with state.lock:
+            full_thinking = "".join(state.thinking_accumulator).strip()
+            full_text = "".join(state.text_accumulator).strip()
+            watchers = self.get_watchers()
+
+            if watchers and state.msg_ids:
+                from bot.factory import bot_factory
+                tg_adapter = bot_factory.get_adapter("telegram")
+                if tg_adapter and getattr(tg_adapter, "app", None):
+                    app = tg_adapter.app
+                    if full_thinking and not full_text:
+                        status_note = "⚠️ *Stream interrupted or timed out.*" if error else "✅ *Thinking phase completed.*"
+                        trunc_think = full_thinking[:1500] + ("..." if len(full_thinking) > 1500 else "")
+                        esc_think = escape_markdown_v2(trunc_think, is_code_block=False)
+                        msg_text = f"🧠 *Thinking Summary:*\n_{esc_think}_\n\n{status_note}"
+                    elif full_text:
+                        msg_parts = []
+                        if full_thinking:
+                            trunc_think = full_thinking[:800] + ("..." if len(full_thinking) > 800 else "")
+                            esc_think = escape_markdown_v2(trunc_think, is_code_block=False)
+                            msg_parts.append(f"🧠 *Thinking:*\n_{esc_think}_")
+
+                        trunc_ans = full_text[:2500] + ("..." if len(full_text) > 2500 else "")
+                        esc_ans = escape_markdown_v2(trunc_ans, is_code_block=False)
+                        status_badge = " ⚠️ *(Interrupted)*" if error else " ✅ *(Done)*"
+                        msg_parts.append(f"💬 *Response:*{status_badge}\n{esc_ans}")
+                        msg_text = "\n\n".join(msg_parts)
+                    else:
+                        return
+
+                    for cid, msg_id in state.msg_ids.items():
+                        try:
+                            await app.bot.edit_message_text(
+                                chat_id=cid,
+                                message_id=msg_id,
+                                text=msg_text,
+                                parse_mode="MarkdownV2",
+                            )
+                        except Exception as e:
+                            if "Message is not modified" not in str(e):
+                                import re
+                                plain_text = re.sub(r"\\(.)", r"\1", msg_text)
+                                try:
+                                    await app.bot.edit_message_text(
+                                        chat_id=cid,
+                                        message_id=msg_id,
+                                        text=plain_text,
+                                        parse_mode=None,
+                                    )
+                                except Exception:
+                                    pass
+
+    def finalize_session_stream(self, session_id: str | None, error: str | None = None) -> None:
         """Clean up tracking state when a streaming session completes."""
         sid = session_id or "default_session"
-        self._session_states.pop(sid, None)
+        state = self._session_states.pop(sid, None)
+        if state:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.finalize_session_stream_async(sid, state, error=error))
+            except RuntimeError:
+                pass
 
 
 # Singleton LiveBridgeManager instance

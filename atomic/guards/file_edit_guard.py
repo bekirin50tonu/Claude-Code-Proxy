@@ -88,9 +88,47 @@ class FileEditGuard(BaseAtomicParser):
         )
         return norm_target, 1, total_lines
 
+    COMMON_STRIP_KEYS = {
+        "description",
+        "thought",
+        "thinking",
+        "explanation",
+        "rationale",
+        "comment",
+        "notes",
+    }
+
+    STRICT_TOOL_PARAMS: dict[str, set[str]] = {
+        "Read": {"file_path", "offset", "limit"},
+        "View": {"file_path", "path", "offset", "limit"},
+        "Glob": {"pattern", "path"},
+        "Grep": {"pattern", "path", "include"},
+        "Bash": {"command", "timeout", "run_in_background", "restart"},
+        "Write": {"file_path", "content"},
+    }
+
     def sanitize_tool_input(self, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-        """Inspect and auto-heal file editing tool call parameters."""
-        if tool_name not in self.EDIT_TOOL_NAMES or not isinstance(tool_input, dict):
+        """Inspect and auto-heal tool call parameters across all Claude Code tools."""
+        if not isinstance(tool_input, dict):
+            return tool_input
+
+        # 1. Prune unexpected metadata keys for strict tools (e.g. 'description' in Read)
+        allowed_params = self.STRICT_TOOL_PARAMS.get(tool_name)
+        if allowed_params:
+            for extra_key in list(tool_input.keys()):
+                if extra_key not in allowed_params and extra_key.lower() in self.COMMON_STRIP_KEYS:
+                    logger.info(
+                        "FileEditGuard: Pruned unexpected key '{}' from '{}' tool call",
+                        extra_key,
+                        tool_name,
+                    )
+                    del tool_input[extra_key]
+
+            # Normalize parameter alias: path -> file_path for Read/Write
+            if tool_name in ("Read", "Write") and "path" in tool_input and "file_path" not in tool_input:
+                tool_input["file_path"] = tool_input.pop("path")
+
+        if tool_name not in self.EDIT_TOOL_NAMES:
             return tool_input
 
         file_path = tool_input.get("TargetFile") or tool_input.get("file_path") or tool_input.get("path")

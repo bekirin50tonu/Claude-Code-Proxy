@@ -18,6 +18,7 @@ class BotFactory:
         self._init_adapters()
         # Register factory broadcast listener with CircuitBreakerRegistry
         circuit_breaker_registry.register_trip_callback(self._on_circuit_breaker_trip_event)
+        circuit_breaker_registry.register_close_callback(self._on_circuit_breaker_close_event)
 
     def _init_adapters(self) -> None:
         """Instantiate available bot adapters."""
@@ -56,6 +57,14 @@ class BotFactory:
         except RuntimeError:
             pass
 
+    def _on_circuit_breaker_close_event(self, model_id: str) -> None:
+        """Synchronous event callback triggered by CircuitBreakerRegistry on close CLOSED."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.broadcast_circuit_breaker_recovery(model_id))
+        except RuntimeError:
+            pass
+
     async def broadcast_circuit_breaker_alert(
         self,
         model_id: str,
@@ -68,6 +77,14 @@ class BotFactory:
                 await adapter.send_circuit_breaker_alert(model_id, reason, fallback_model)
             except Exception as e:
                 logger.warning(f"Error sending proactive alert via '{name}': {e}")
+
+    async def broadcast_circuit_breaker_recovery(self, model_id: str) -> None:
+        """Dispatch proactive Circuit Breaker recovery alert to all active bot platforms."""
+        for name, adapter in self.adapters.items():
+            try:
+                await adapter.send_circuit_breaker_recovery(model_id)
+            except Exception as e:
+                logger.warning(f"Error sending recovery alert via '{name}': {e}")
 
     async def send_to_thread(self, session_id: str, title: str, text: str) -> None:
         """Dispatch session thread message to all active bot platforms."""

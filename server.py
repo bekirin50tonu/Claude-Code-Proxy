@@ -22,25 +22,27 @@ from core.interceptor import JSONRepairMiddleware
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown lifecycles."""
-    import os
     import signal
 
     from config import model_registry, settings, stats
 
     logger.info("Initializing Claude Code Proxy Server...")
 
-    # Register SIGHUP signal handler for zero-downtime hot-reload
+    # Register SIGHUP signal handler for zero-downtime hot-reload of config and models
     def _handle_sighup(signum: int, frame: Any) -> None:
         logger.info("Received SIGHUP signal. Reloading settings & model registry in-memory...")
-        settings.reload()
-        model_registry.reload()
+        try:
+            settings.reload()
+            model_registry.reload()
+            logger.success("In-memory settings & model registry successfully reloaded on SIGHUP.")
+        except Exception as err:
+            logger.error("Failed to reload configuration on SIGHUP: {}", err)
 
     if hasattr(signal, "SIGHUP"):
         with contextlib.suppress(ValueError, OSError):
             signal.signal(signal.SIGHUP, _handle_sighup)
 
     # Automatically sync settings
-    port = int(os.getenv("PORT", os.getenv("GATEWAY_PORT", 8090)))
     from api.settings_manager import claude_settings_manager
     claude_settings_manager.sync_proxy_to_claude()
 

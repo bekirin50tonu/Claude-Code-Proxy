@@ -1313,6 +1313,7 @@ def test_extract_all_json_tool_calls_case_insensitive_matching() -> None:
 def test_reorder_model_fallbacks_endpoint() -> None:
     """Test /api/dev/models/reorder endpoint updates model fallback chains and preserves order."""
     from fastapi.testclient import TestClient
+
     from config import model_registry
     from server import app
 

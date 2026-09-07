@@ -114,7 +114,7 @@ class NimThrottleGuard:
         remaining = max(0.001, timeout_budget - (time.monotonic() - start_time))
         try:
             await asyncio.wait_for(self._concurrency_semaphore.acquire(), timeout=remaining)
-        except (asyncio.TimeoutError, TimeoutError):
+        except TimeoutError:
             raise NimQueueTimeoutError(
                 model_name=model_name,
                 waited_seconds=round(time.monotonic() - start_time, 2),

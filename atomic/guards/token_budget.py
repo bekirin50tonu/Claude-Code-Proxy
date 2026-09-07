@@ -142,10 +142,14 @@ class TokenBudgetGuard:
         messages: list[dict[str, Any]],
         system: str | list[dict[str, Any]] | None,
         max_tokens: int,
+        tools: list[dict[str, Any]] | None = None,
     ) -> int:
+        import json
         total = _system_tokens(system, self._enc)
         for msg in messages:
             total += _message_tokens(msg, self._enc)
+        if tools:
+            total += _count_tokens(json.dumps(tools), self._enc)
         total += max_tokens
         total += SAFETY_BUFFER
         return total
@@ -160,10 +164,20 @@ class TokenBudgetGuard:
         messages: list[dict[str, Any]],
         system: str | list[dict[str, Any]] | None,
         max_tokens: int,
+        tools: list[dict[str, Any]] | None = None,
     ) -> tuple[list[dict[str, Any]], str | list[dict[str, Any]] | None, bool]:
+        """Check and truncate conversation messages according to the Context Retention Hierarchy.
+
+        Hierarchy Rules:
+        1. System Prompt Priority: The `system` directive and tools schema are preserved 100%.
+        2. Older Turn Trimming: Excess turns are removed from the head of `messages` oldest-first.
+        3. Turn Alternation: After trimming, the conversation is aligned to start with a 'user' role.
+        4. Tail Message Safeguard: If the last message alone exceeds remaining budget, its text
+           is sliced keeping the most recent tokens.
+        """
         max_tokens = self.clamp_max_tokens(max_tokens)
         context_limit = self.metadata.context
-        total = self.count_total_tokens(messages, system, max_tokens)
+        total = self.count_total_tokens(messages, system, max_tokens, tools=tools)
 
         if total <= context_limit:
             return messages, system, False
@@ -173,19 +187,27 @@ class TokenBudgetGuard:
         truncated = list(messages)
         was_truncated = False
 
+        def _is_tool_result_turn(msg: dict[str, Any]) -> bool:
+            c = msg.get("content")
+            if isinstance(c, list):
+                return any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c)
+            return False
+
         while len(truncated) > 1:
-            total = self.count_total_tokens(truncated, system, max_tokens)
+            total = self.count_total_tokens(truncated, system, max_tokens, tools=tools)
             if total <= context_limit:
                 break
             removed = truncated.pop(0)
             was_truncated = True
-            while truncated and truncated[0].get("role") != "user":
+            while truncated and (truncated[0].get("role") != "user" or _is_tool_result_turn(truncated[0])):
                 truncated.pop(0)
             logger.debug("TokenBudget: removed '%s' message", removed.get("role"))
 
-        total = self.count_total_tokens(truncated, system, max_tokens)
+        total = self.count_total_tokens(truncated, system, max_tokens, tools=tools)
         if total > context_limit and truncated:
-            overhead = _system_tokens(system, self._enc) + max_tokens + SAFETY_BUFFER
+            import json
+            tools_tok = _count_tokens(json.dumps(tools), self._enc) if tools else 0
+            overhead = _system_tokens(system, self._enc) + tools_tok + max_tokens + SAFETY_BUFFER
             allowed_prompt_tokens = max(500, context_limit - overhead)
 
             last_msg = dict(truncated[-1])

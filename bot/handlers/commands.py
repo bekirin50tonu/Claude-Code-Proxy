@@ -61,12 +61,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "🛠️ *Claude Code Proxy Bot Commands*\n\n"
         "• `/status` \\- View proxy configuration and Circuit Breaker states\n"
         "• `/reset_circuit <id|name>` \\- Reset Circuit Breaker for a model/provider back to `CLOSED` state\n"
+        "• `/reset_breakers` \\- Reset ALL open circuit breakers at once\n"
         "• `/set_model <KEY> <PROVIDER/MODEL>` \\- Dynamically update model mapping\n"
         "• `/run <command>` \\- Execute bash command in proxy workspace\n"
         "• `/help` \\- Show this help menu\n\n"
         "💡 *Examples:*\n"
         "`/reset_circuit nvidia_nim/nvidia/llama-3.1-nemotron-70b-instruct`\n"
         "`/reset_circuit nvidia_nim`\n"
+        "`/reset_breakers`\n"
         "`/set_model MODEL_SONNET open_router/anthropic/claude-3.5-sonnet`"
     )
     if update.message:
@@ -130,6 +132,39 @@ async def reset_circuit_command(update: Update, context: ContextTypes.DEFAULT_TY
         "📊 *Yeni Durum:* `CLOSED` \\(İsteklere Açık\\)"
     )
 
+    if update.message:
+        await update.message.reply_text(
+            text=reply_text,
+            parse_mode=ParseMode.MARKDOWN_V2,
+        )
+
+
+async def reset_breakers_all_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler for /reset_breakers command — reset ALL circuit breakers to CLOSED."""
+    if not is_authorized(update):
+        return
+
+    all_breakers = circuit_breaker_registry._breakers
+    reset_models: list[str] = []
+    for mid, cb in list(all_breakers.items()):
+        if cb.state.value != "closed":
+            cb.reset()
+            reset_models.append(mid)
+
+    if not reset_models:
+        if update.message:
+            await update.message.reply_text(
+                "ℹ️ *Tüm Devre Kesiciler Zaten Kapalı*\n\nAçık circuit breaker yok, sıfırlanacak bir şey yok.",
+                parse_mode=ParseMode.MARKDOWN_V2,
+            )
+        return
+
+    models_str = ", ".join(f"`{escape_markdown_v2(m, is_code_block=True)}`" for m in reset_models)
+    reply_text = (
+        "✅ *Tüm Devre Kesiciler Sıfırlandı\\!*\n\n"
+        f"🔌 *Sıfırlanan Model\\(ler\\):* {models_str}\n"
+        f"📊 *Toplam:* {len(reset_models)} breaker CLOSED durumuna getirildi."
+    )
     if update.message:
         await update.message.reply_text(
             text=reply_text,

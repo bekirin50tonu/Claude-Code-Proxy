@@ -29,15 +29,15 @@ class BaseProvider(ABC):
             return None
         openai_tools = []
         for tool in tools:
+            params = dict(tool.get("input_schema", {"type": "object", "properties": {}}))
+            params.pop("$schema", None)
             openai_tools.append(
                 {
                     "type": "function",
                     "function": {
                         "name": tool.get("name"),
                         "description": tool.get("description", ""),
-                        "parameters": tool.get(
-                            "input_schema", {"type": "object", "properties": {}}
-                        ),
+                        "parameters": params,
                     },
                 }
             )
@@ -72,6 +72,18 @@ class BaseProvider(ABC):
             if system_text:
                 raw_openai_messages.append({"role": "system", "content": system_text})
 
+        # Pre-pass: map tool_use_id to tool name from history
+        tool_id_to_name: dict[str, str] = {}
+        for m in messages:
+            m_content = m.get("content")
+            if isinstance(m_content, list):
+                for b in m_content:
+                    if isinstance(b, dict) and b.get("type") == "tool_use":
+                        tid = b.get("id")
+                        tname = b.get("name")
+                        if tid and tname:
+                            tool_id_to_name[tid] = tname
+
         for msg in messages:
             role = msg.get("role")
             content = msg.get("content")
@@ -81,62 +93,94 @@ class BaseProvider(ABC):
                 raw_openai_messages.append({"role": role_str, "content": content})
                 continue
 
-            if isinstance(content, list):
-                text_parts = []
-                tool_calls = []
-                tool_results = []
+            if not isinstance(content, list):
+                raw_openai_messages.append({"role": role_str, "content": ""})
+                continue
 
-                for block in content:
-                    block_type = block.get("type")
-                    if block_type == "text":
-                        text_parts.append(block.get("text", ""))
-                    elif block_type == "tool_use":
-                        tool_calls.append(
-                            {
-                                "id": block.get("id"),
-                                "type": "function",
-                                "function": {
-                                    "name": block.get("name"),
-                                    "arguments": json.dumps(block.get("input", {})),
-                                },
-                            }
-                        )
-                    elif block_type == "tool_result":
-                        res_content = block.get("content")
-                        if isinstance(res_content, list):
-                            res_text = "\n".join(
-                                [
-                                    b.get("text", "") if isinstance(b, dict) and b.get("type") == "text" else str(b)
-                                    for b in res_content
-                                ]
-                            )
-                        else:
-                            res_text = str(res_content or "")
+            text_parts = []
+            tool_calls = []
+            tool_results = []
 
-                        tool_res_dict: dict[str, Any] = {
-                            "role": "tool",
-                            "tool_call_id": block.get("tool_use_id") or f"toolu_{uuid.uuid4().hex[:8]}",
-                            "content": res_text,
+            for block in content:
+                block_type = block.get("type")
+                if block_type == "text":
+                    text_parts.append(block.get("text", ""))
+                elif block_type == "thinking":
+                    thinking = block.get("thinking", "")
+                    if thinking:
+                        text_parts.append(f"<think>\n{thinking}\n</think>")
+                elif block_type == "tool_use":
+                    tool_calls.append(
+                        {
+                            "id": block.get("id"),
+                            "type": "function",
+                            "function": {
+                                "name": block.get("name"),
+                                "arguments": json.dumps(block.get("input", {})),
+                            },
                         }
-                        tool_results.append(tool_res_dict)
+                    )
+                elif block_type == "tool_result":
+                    res_content = block.get("content")
+                    if isinstance(res_content, list):
+                        res_text = "\n".join(
+                            [
+                                b.get("text", "") if isinstance(b, dict) and b.get("type") == "text" else str(b)
+                                for b in res_content
+                            ]
+                        )
+                    else:
+                        res_text = str(res_content or "")
 
-                content_str = "\n".join(text_parts) if text_parts else None
+                    t_id = block.get("tool_use_id") or f"toolu_{uuid.uuid4().hex[:8]}"
+                    tool_res_dict: dict[str, Any] = {
+                        "role": "tool",
+                        "tool_call_id": t_id,
+                        "content": res_text,
+                    }
+                    # Preserve tool name from tool_result block for synthetic injection
+                    if "name" in block:
+                        tool_res_dict["name"] = block["name"]
+                    tool_results.append(tool_res_dict)
 
-                if role_str == "assistant":
-                    msg_obj: dict[str, Any] = {"role": "assistant"}
-                    if content_str:
-                        msg_obj["content"] = content_str
-                    if tool_calls:
-                        msg_obj["tool_calls"] = tool_calls
-                    raw_openai_messages.append(msg_obj)
-                elif role_str == "user":
-                    if content_str:
-                        raw_openai_messages.append({"role": "user", "content": content_str})
-                    if tool_results:
-                        raw_openai_messages.extend(tool_results)
-                elif role_str == "system":
-                    if content_str:
+            content_str = "\n".join(text_parts) if text_parts else None
+
+            if role_str == "assistant":
+                msg_obj: dict[str, Any] = {"role": "assistant"}
+                if content_str:
+                    msg_obj["content"] = content_str
+                elif not tool_calls:
+                    msg_obj["content"] = " "
+                else:
+                    msg_obj["content"] = None
+
+                if tool_calls:
+                    msg_obj["tool_calls"] = tool_calls
+                raw_openai_messages.append(msg_obj)
+            elif role_str == "user":
+                # Crucial for OpenAI spec: tool_results must immediately follow assistant tool_calls
+                if tool_results:
+                    raw_openai_messages.extend(tool_results)
+                if content_str:
+                    raw_openai_messages.append({"role": "user", "content": content_str})
+            elif role_str == "system":
+                if content_str:
+                    # In OpenAI Chat Completions API, system role should not appear after dialogue begins.
+                    # Convert intermediate hook/reminder system messages to <system-reminder> on a user turn
+                    # so the model maintains valid alternation and always responds to the active user prompt.
+                    has_prior_dialogue = any(m.get("role") in ("user", "assistant", "tool") for m in raw_openai_messages)
+                    if not has_prior_dialogue:
                         raw_openai_messages.append({"role": "system", "content": content_str})
+                    elif raw_openai_messages and raw_openai_messages[-1].get("role") == "user":
+                        prev_content = raw_openai_messages[-1].get("content") or ""
+                        raw_openai_messages[-1]["content"] = (
+                            f"{prev_content}\n\n<system-reminder>\n{content_str}\n</system-reminder>".strip()
+                        )
+                    else:
+                        raw_openai_messages.append({
+                            "role": "user",
+                            "content": f"<system-reminder>\n{content_str}\n</system-reminder>",
+                        })
 
         # ---------------------------------------------------------------------
         # Post-Processing Pass: Synthetic Tool Call Injection & Schema Fixing
@@ -146,7 +190,7 @@ class BaseProvider(ABC):
         for msg in raw_openai_messages:
             if msg.get("role") == "tool":
                 tool_call_id = msg.get("tool_call_id") or f"toolu_{uuid.uuid4().hex[:8]}"
-                tool_name = msg.get("name") or "bash"
+                tool_name = msg.pop("name", None) or tool_id_to_name.get(tool_call_id) or "custom_tool"
                 msg["tool_call_id"] = tool_call_id
 
                 # Find preceding assistant message

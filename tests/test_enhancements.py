@@ -82,3 +82,46 @@ async def test_new_mcp_tools() -> None:
     # Test sync_proxy_to_claude
     res_sync = await execute_mcp_tool("sync_proxy_to_claude", {})
     assert "status" in res_sync["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_action_continuation_emits_tool_call(monkeypatch) -> None:
+    """Verify that when the model emits only thinking, action continuation emits a tool call instead of closing the turn."""
+    from unittest.mock import AsyncMock
+
+    from core.transformer.stream_engine import StreamEngine
+    from providers.openai import OpenAICompatibleProvider
+
+    tools = [{
+        "name": "Bash",
+        "description": "Run bash",
+        "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}},
+    }]
+    engine = StreamEngine(target_model="claude-opus-5", tools=tools, session_id="test_continuation")
+
+    mock_complete = AsyncMock(return_value={
+        "choices": [{
+            "message": {
+                "tool_calls": [{
+                    "id": "call-123",
+                    "type": "function",
+                    "function": {"name": "Bash", "arguments": '{"command": "mkdir -p src/app"}'},
+                }]
+            }
+        }]
+    })
+    monkeypatch.setattr(OpenAICompatibleProvider, "complete", mock_complete)
+
+    async def mock_upstream():
+        yield {"choices": [{"delta": {"reasoning_content": "Let me create the directory structure."}}]}
+        yield {"choices": [{"delta": {}, "finish_reason": "stop"}]}
+
+    events = []
+    async for ev in engine.stream_response(mock_upstream()):
+        events.append(ev)
+
+    assert any("tool_use" in ev for ev in events)
+    assert any("mkdir -p src/app" in ev for ev in events)
+    assert engine.text_or_tool_emitted is True
+    assert engine.final_stop_reason == "tool_use"
+

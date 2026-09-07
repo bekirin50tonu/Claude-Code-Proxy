@@ -9,24 +9,14 @@ from loguru import logger
 from atomic.sanitizers.gemini_sanitizer import GeminiPayloadSanitizer
 from atomic.sanitizers.nim_sanitizer import NimPayloadSanitizer
 from config import settings
+from config.providers_registry import PROVIDER_REGISTRY, UnknownProviderError
+from core.key_manager import universal_key_manager
 from providers.base import BaseProvider
-
-_key_counters: dict[str, int] = {}
-_key_lock = asyncio.Lock()
 
 
 async def _select_key(raw_key: str, provider_part: str) -> str:
-    """Select single key or rotate through comma-separated keys round-robin with asyncio.Lock."""
-    if not raw_key:
-        return ""
-    if "," in raw_key:
-        keys = [k.strip() for k in raw_key.split(",") if k.strip()]
-        if keys:
-            async with _key_lock:
-                idx = _key_counters.get(provider_part, 0)
-                _key_counters[provider_part] = (idx + 1) % len(keys)
-                return keys[idx]
-    return raw_key.strip()
+    """Backward compatibility helper wrapping universal_key_manager.select_key."""
+    return await universal_key_manager.select_key(raw_key, provider_part)
 
 
 class OpenAICompatibleProvider(BaseProvider):
@@ -34,61 +24,35 @@ class OpenAICompatibleProvider(BaseProvider):
         self, mapped_model: str
     ) -> tuple[str, str, str, dict[str, str]]:
         """Resolve base URL, actual model name, API key, and extra headers."""
-        extra_headers = {}
         if "/" in mapped_model:
             provider_part, model_name = mapped_model.split("/", 1)
         else:
             provider_part = "lmstudio"
             model_name = mapped_model
 
-        if provider_part == "nvidia_nim":
-            base_url = settings.NVIDIA_NIM_BASE_URL
-            api_key = await _select_key(settings.NVIDIA_NIM_API_KEY, "nvidia_nim")
-        elif provider_part == "open_router":
-            base_url = settings.OPENROUTER_BASE_URL
-            api_key = await _select_key(settings.OPENROUTER_API_KEY, "open_router")
-            extra_headers["HTTP-Referer"] = (
-                "https://github.com/bekirin50tonu/Claude-Code-Proxy"
-            )
-            extra_headers["X-Title"] = "Claude Code Proxy"
-        elif provider_part == "tokenrouter":
-            base_url = settings.TOKENROUTER_BASE_URL
-            api_key = await _select_key(settings.TOKENROUTER_API_KEY, "tokenrouter")
-        elif provider_part == "groq":
-            base_url = settings.GROQ_BASE_URL
-            api_key = await _select_key(settings.GROQ_API_KEY, "groq")
-        elif provider_part == "deepseek":
-            base_url = settings.DEEPSEEK_BASE_URL
-            api_key = await _select_key(settings.DEEPSEEK_API_KEY, "deepseek")
-        elif provider_part == "mistral":
-            base_url = settings.MISTRAL_BASE_URL
-            api_key = await _select_key(settings.MISTRAL_API_KEY, "mistral")
-        elif provider_part == "cerebras":
-            base_url = settings.CEREBRAS_BASE_URL
-            api_key = await _select_key(settings.CEREBRAS_API_KEY, "cerebras")
-        elif provider_part == "fireworks":
-            base_url = settings.FIREWORKS_BASE_URL
-            api_key = await _select_key(settings.FIREWORKS_API_KEY, "fireworks")
-        elif provider_part == "kimi":
-            base_url = "https://api.moonshot.cn/v1"
-            api_key = await _select_key(settings.KIMI_API_KEY, "kimi")
-        elif provider_part == "gemini":
-            base_url = settings.GEMINI_BASE_URL.rstrip("/") + "/openai"
-            api_key = await _select_key(settings.GEMINI_API_KEY, "gemini")
-        elif provider_part == "lmstudio":
-            base_url = settings.LM_STUDIO_BASE_URL
-            api_key = ""
-        elif provider_part == "ollama":
-            base_url = settings.OLLAMA_BASE_URL
-            api_key = ""
-        elif provider_part == "llama_cpp":
-            base_url = settings.LLAMA_CPP_BASE_URL
-            api_key = ""
-        else:
-            # Unknown provider — fall back to LM Studio local
-            base_url = settings.LM_STUDIO_BASE_URL
-            api_key = ""
-            model_name = mapped_model
+        spec = PROVIDER_REGISTRY.get(provider_part)
+        if not spec:
+            mode = getattr(settings, "UNKNOWN_PROVIDER_MODE", "raise").lower()
+            if mode == "raise":
+                raise UnknownProviderError(provider_part, list(PROVIDER_REGISTRY.keys()))
+            elif mode == "log":
+                logger.error(
+                    "Unknown provider '{}'. Falling back to LM Studio local.", provider_part
+                )
+                spec = PROVIDER_REGISTRY["lmstudio"]
+            else:
+                spec = PROVIDER_REGISTRY["lmstudio"]
+
+        base_url = getattr(settings, spec.base_url_attr, spec.default_base_url) or spec.default_base_url
+        if spec.url_path_suffix:
+            base_url = base_url.rstrip("/") + spec.url_path_suffix
+
+        raw_key = getattr(settings, spec.api_key_attr, "") if spec.api_key_attr else ""
+        if provider_part == "nvidia_nim" and not raw_key:
+            raw_key = getattr(settings, "NVIDIA_NIM_API_KEY", "")
+
+        api_key = await _select_key(raw_key, provider_part)
+        extra_headers = dict(spec.extra_headers)
 
         return base_url, model_name, api_key, extra_headers
 
@@ -123,6 +87,12 @@ class OpenAICompatibleProvider(BaseProvider):
         if openai_tools:
             payload["tools"] = openai_tools
             payload["tool_choice"] = "auto"
+        if kwargs.get("response_format"):
+            payload["response_format"] = kwargs["response_format"]
+        elif kwargs.get("output_config"):
+            payload["output_config"] = kwargs["output_config"]
+        if kwargs.get("extra_body"):
+            payload["extra_body"] = kwargs["extra_body"]
 
         provider_part_check = model.split("/", 1)[0] if "/" in model else ""
 
@@ -133,8 +103,14 @@ class OpenAICompatibleProvider(BaseProvider):
         elif provider_part_check == "nvidia_nim" or "nvidia_nim" in model.lower():
             max_out = p_cfg.get("max_output")
             payload = await NimPayloadSanitizer.sanitize(payload, max_output_override=max_out)
+        elif provider_part_check in ("open_router", "openrouter") or "openrouter" in model.lower():
+            extra_body = dict(payload.get("extra_body") or {})
+            extra_body.setdefault("reasoning", {"enabled": True})
+            payload["extra_body"] = extra_body
+        from shared.utils.timeout_calculator import calculate_dynamic_timeout
+
         connect_t = p_cfg.get("http_connect_timeout") or settings.HTTP_CONNECT_TIMEOUT
-        read_t = p_cfg.get("http_read_timeout") or settings.HTTP_READ_TIMEOUT
+        read_t = calculate_dynamic_timeout(model, messages=messages, tools=tools, max_tokens=max_tokens, system=system)
         write_t = p_cfg.get("http_write_timeout") or settings.HTTP_WRITE_TIMEOUT
 
         timeout = httpx.Timeout(
@@ -180,7 +156,7 @@ class OpenAICompatibleProvider(BaseProvider):
                         from core.key_manager import nim_key_manager
                         await nim_key_manager.mark_passive(current_key)
                         logger.warning(
-                            "NVIDIA NIM Stream HTTP %d on key #%d. Silent failover to next key in pool...",
+                            "NVIDIA NIM Stream HTTP {} on key #{}. Silent failover to next key in pool...",
                             response.status_code,
                             key_idx + 1,
                         )
@@ -191,7 +167,7 @@ class OpenAICompatibleProvider(BaseProvider):
                         await response.aclose()
                         error_text = error_bytes.decode("utf-8", errors="replace")
                         logger.error(
-                            "Upstream Stream HTTP %d Error from %s: %s",
+                            "Upstream Stream HTTP {} Error from {}: {}",
                             response.status_code,
                             f"{base_url.rstrip('/')}/chat/completions",
                             error_text,
@@ -211,7 +187,7 @@ class OpenAICompatibleProvider(BaseProvider):
                             from core.key_manager import nim_key_manager
                             await nim_key_manager.mark_passive(current_key)
                             logger.warning(
-                                "NVIDIA NIM Non-Stream HTTP %d on key #%d. Silent failover to next key in pool...",
+                                "NVIDIA NIM Non-Stream HTTP {} on key #{}. Silent failover to next key in pool...",
                                 status_err.response.status_code,
                                 key_idx + 1,
                             )
@@ -279,7 +255,7 @@ class OpenAICompatibleProvider(BaseProvider):
             response = await client.post(url, headers=headers, json=payload)
             if response.status_code >= 400:
                 logger.error(
-                    "Upstream HTTP %d Error from %s: %s",
+                    "Upstream HTTP {} Error from {}: {}",
                     response.status_code,
                     url,
                     response.text,

@@ -1,6 +1,5 @@
 """Telegram remote prompt sanitization and request payload injection helper."""
 
-import html
 from typing import Any
 
 from loguru import logger
@@ -17,10 +16,10 @@ def sanitize_telegram_prompt(prompt: str, max_length: int = 2000) -> str:
     for token in forbidden:
         cleaned = cleaned.replace(token, "")
 
-    escaped = html.escape(cleaned.strip())
-    if len(escaped) > max_length:
-        escaped = escaped[:max_length] + " [truncated]"
-    return escaped
+    cleaned = cleaned.strip()
+    if len(cleaned) > max_length:
+        cleaned = cleaned[:max_length] + " [truncated]"
+    return cleaned
 
 
 def inject_telegram_prompts(body: dict[str, Any], session_id: str) -> dict[str, Any]:

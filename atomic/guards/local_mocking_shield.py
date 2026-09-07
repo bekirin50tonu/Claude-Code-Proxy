@@ -20,8 +20,6 @@ class LocalMockingShield:
         "autocomplete suggestion",
         "predict next input",
         "suggestion for the next prompt",
-        "autocomplete",
-        "suggestions",
         # Title Generation
         "generate a short, 2-4 word title",
         "create a title for this conversation",
@@ -33,8 +31,8 @@ class LocalMockingShield:
         "network probe",
         "ping check",
         "test connection",
-        "ping",
-        "discovery",
+        "discovery check",
+        "discovery probe",
     }
 
     @classmethod
@@ -74,25 +72,37 @@ class LocalMockingShield:
 
         all_text = cls.get_all_text(payload).lower()
 
-        # Stop Hook evaluation & schema requests from Claude CLI MUST NOT be intercepted!
-        if "evaluating a stop-condition hook" in all_text or "hook_event_name" in all_text or "output_config" in payload:
+        # 1. Requests with tools, output_config, thinking or hook evaluations MUST NOT be intercepted!
+        if (
+            payload.get("tools")
+            or "output_config" in payload
+            or "thinking" in payload
+            or "evaluating a stop-condition hook" in all_text
+            or "hook_event_name" in all_text
+        ):
             return False, ""
 
         max_tokens = payload.get("max_tokens", 4096)
 
-        # 1. Check max_tokens <= 2 (Network probe / Ping)
+        # 2. Check max_tokens <= 2 (Network probe / Ping) - only if prompt length is small (<500 chars)
         if isinstance(max_tokens, int) and max_tokens <= 2:
-            return True, "ping_probe"
+            if len(all_text) < 500:
+                return True, "ping_probe"
+            return False, ""
 
-        # 2. Check explicitly matching keywords
+        # 3. Check explicitly matching keywords with context length safeguards
         for kw in cls.HOUSEKEEPING_KEYWORDS:
             if kw in all_text:
-                if kw in ("network-probe", "network probe", "ping check", "test connection", "ping", "discovery"):
-                    return True, "ping_probe"
+                if kw in ("network-probe", "network probe", "ping check", "test connection", "discovery check", "discovery probe"):
+                    # Ping probes must have short prompt length (<500 chars)
+                    if len(all_text) < 500:
+                        return True, "ping_probe"
                 elif kw in ("title_generation", "generate a short, 2-4 word title", "create a title for this conversation", "summarize this conversation into a title", "provide a short title"):
-                    return True, "title_generation"
+                    if len(all_text) < 2000:
+                        return True, "title_generation"
                 else:
-                    return True, "autocomplete_suggestion"
+                    if len(all_text) < 2000:
+                        return True, "autocomplete_suggestion"
 
         return False, ""
 

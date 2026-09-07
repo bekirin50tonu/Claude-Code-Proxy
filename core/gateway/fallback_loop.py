@@ -1,6 +1,8 @@
 """Upstream model execution and candidate failover loop for Core Gateway."""
 
+import asyncio
 import sys
+import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -12,7 +14,7 @@ from atomic.guards.nim_guard import nim_throttle_guard
 from atomic.guards.stream_guard import guarded
 from atomic.guards.token_budget import TokenBudgetGuard
 from config import settings, stats
-from core.gateway.stream_handler import record_request_log
+from core.gateway.stream_handler import extract_session_id, record_request_log
 from core.interceptor.json_repair import JSONRepairNormalizer
 from core.router.selector import model_selector
 from core.transformer.stream_engine import StreamEngine, translate_non_stream_response
@@ -69,6 +71,53 @@ async def try_models(
     attempt_history: list[dict[str, Any]] = []
 
     is_stop_hook = JSONRepairNormalizer.is_stop_hook_target(body)
+    is_evaluator = JSONRepairNormalizer.is_evaluator_hook_target(body)
+
+    # Detect Recap / Away Summary requests
+    is_recap = False
+    if isinstance(messages, list) and messages:
+        last_m = messages[-1]
+        if isinstance(last_m, dict) and last_m.get("role") == "user":
+            c = last_m.get("content", "")
+            if isinstance(c, list):
+                c = " ".join(str(b.get("text", "")) for b in c if isinstance(b, dict))
+            c_lower = str(c).lower()
+            if any(k in c_lower for k in ("the user stepped away and is coming back", "recap in under", "recap in 1-2 plain sentences", "user stepped away")):
+                is_recap = True
+
+    if is_recap:
+        # 1. Strip tools from recap requests to save ~43.5k tokens of schema budget
+        tools = None
+        # 2. Inject clean anti-hallucination guidance strictly based on actual recent messages
+        recap_guidance = (
+            "\n\n[RECAP DIRECTIVE]\n"
+            "- Summarize the ACTUAL current state strictly based on the most recent conversation messages.\n"
+            "- Accurately state what was just completed or what error occurred.\n"
+            "- If an operation was in progress or interrupted, state that clearly.\n"
+            "- Do NOT assume completed actions or invent future steps that have not been executed.\n"
+            "- Keep the response concise, strictly under 40 words in plain text without markdown."
+        )
+        if isinstance(system, list):
+            system = list(system) + [{"type": "text", "text": recap_guidance}]
+        elif isinstance(system, str):
+            system = system + recap_guidance
+        else:
+            system = recap_guidance
+
+    if is_evaluator or is_stop_hook:
+        evaluator_guidance = (
+            "\n\n[GOAL EVALUATION DIRECTIVE]\n"
+            "- Be critical and rigorous. Do NOT mark a goal satisfied prematurely based on passive inspection alone.\n"
+            "- Informational queries (such as list_screens, ls, grep, find, reading files) are exploratory actions, NOT goal fulfillment.\n"
+            "- If the goal specifies creating, adding, editing, or implementing code/UI/features, verify that actual file modifications or creations (e.g. Write, Edit, NotebookEdit) were executed in recent turns.\n"
+            "- If the requested implementation work has not yet been executed on disk, you must mark stop_hook_active: false (or ok: false) and specify in the reason what remaining work needs to be done."
+        )
+        if isinstance(system, list):
+            system = list(system) + [{"type": "text", "text": evaluator_guidance}]
+        elif isinstance(system, str):
+            system = system + evaluator_guidance
+        else:
+            system = evaluator_guidance
 
     for mapped_model in candidates:
         concurrency_decremented = False
@@ -84,8 +133,10 @@ async def try_models(
             continue
 
         token_guard = TokenBudgetGuard(mapped_model)
-        cur_messages, cur_system, _ = token_guard.check_and_truncate(messages, system, max_tokens)
-        clamped_max_tokens = token_guard.clamp_max_tokens(max_tokens)
+        cur_messages, cur_system, _ = token_guard.check_and_truncate(messages, system, max_tokens, tools=tools)
+        prompt_tokens_est = token_guard.count_prompt_tokens(cur_messages, cur_system, tools)
+        headroom = max(1024, token_guard.metadata.context - prompt_tokens_est - 100)
+        clamped_max_tokens = min(token_guard.clamp_max_tokens(max_tokens), headroom)
         clamped_temp = min(temperature, 0.6) if "llama" in mapped_model.lower() else temperature
 
         is_nim = mapped_model.startswith("nvidia_nim/")
@@ -94,6 +145,16 @@ async def try_models(
 
         stats.active_concurrency += 1
         try:
+            from shared.utils.dev_logger import dev_logger
+            dev_logger.record_transaction_start(
+                request_id=f"req_{int(time.time()*1000)}",
+                method="POST",
+                path="/v1/messages",
+                client_model=client_model,
+                mapped_model=mapped_model,
+                request_body=body,
+            )
+
             if nim_cm:
                 await nim_cm.__aenter__()
                 nim_acquired = True
@@ -108,14 +169,50 @@ async def try_models(
                     stream=stream,
                     temperature=clamped_temp,
                     max_tokens=clamped_max_tokens,
+                    output_config=body.get("output_config"),
+                    extra_body=body.get("extra_body"),
                 )
 
                 if stream and not isinstance(upstream_res, tuple):
-                    session_id = request.headers.get("x-session-id") or request.headers.get("x-conversation-id")
-                    engine = StreamEngine(target_model=client_model, tools=tools, session_id=session_id, is_stop_hook=is_stop_hook)
+                    session_id = extract_session_id(request, body)
+                    engine = StreamEngine(
+                        target_model=client_model,
+                        tools=tools,
+                        session_id=session_id,
+                        is_stop_hook=is_stop_hook,
+                        is_evaluator=is_evaluator,
+                    )
+                    from shared.utils.timeout_calculator import (
+                        calculate_dynamic_timeout,
+                    )
+                    dynamic_stream_timeout = calculate_dynamic_timeout(
+                        client_model,
+                        messages=cur_messages,
+                        tools=tools,
+                        max_tokens=clamped_max_tokens,
+                        system=cur_system,
+                    )
+                    # Peek first chunk to verify stream validity before returning 200 StreamingResponse
+                    first_chunk = None
+                    try:
+                        first_chunk = await asyncio.wait_for(
+                            upstream_res.__anext__(),
+                            timeout=min(dynamic_stream_timeout, 45.0),
+                        )
+                    except StopAsyncIteration:
+                        raise RuntimeError(f"Upstream model '{mapped_model}' returned an empty stream (0 chunks).")
+                    except Exception as first_chunk_err:
+                        raise first_chunk_err
+
+                    async def _chained_upstream():
+                        if first_chunk is not None:
+                            yield first_chunk
+                        async for c in upstream_res:
+                            yield c
+
                     guarded_stream = guarded(
-                        engine.stream_response(upstream_res),
-                        stream_timeout=_get_settings().HTTP_READ_TIMEOUT,
+                        engine.stream_response(_chained_upstream()),
+                        stream_timeout=dynamic_stream_timeout,
                     )
 
                     active_nim_cm = nim_cm if nim_acquired else None
@@ -141,6 +238,7 @@ async def try_models(
                                 target_model, success=False, headers={}
                             )
                             logger.error("Stream error for '%s': %s", target_model, exc)
+                            yield f'event: error\ndata: {{"type": "error", "error": {{"type": "api_error", "message": "Stream error: {exc}"}}}}\n\n'
                         finally:
                             stats.active_concurrency -= 1
                             if nim_ctx:
@@ -167,6 +265,7 @@ async def try_models(
                             "Content-Type": "text/event-stream",
                             "Cache-Control": "no-cache",
                             "Connection": "keep-alive",
+                            "X-Accel-Buffering": "no",
                         },
                     )
 
@@ -178,8 +277,10 @@ async def try_models(
                     translated = translate_non_stream_response(resp_body)
                     translated["model"] = client_model
 
-                    if is_stop_hook:
-                        translated = await JSONRepairNormalizer.process_response_dict(translated, is_stop_hook=True)
+                    if is_stop_hook or is_evaluator:
+                        translated = await JSONRepairNormalizer.process_response_dict(
+                            translated, is_stop_hook=is_stop_hook, is_evaluator=is_evaluator
+                        )
 
                     record_request_log(
                         "POST",

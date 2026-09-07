@@ -44,6 +44,27 @@ def format_circuit_breaker_alert_tg(
     return msg
 
 
+def format_circuit_breaker_recovery_tg(model_id: str) -> str:
+    """Generate Telegram notification when a circuit breaker recovers (CLOSED)."""
+    esc_model = escape_markdown_v2(model_id, is_code_block=True)
+    return (
+        "✅ *Circuit Breaker Recovered\\!*\n\n"
+        f"🔌 *Provider/Model:* `{esc_model}`\n"
+        "📊 *Status:* `CLOSED` \\(Requests Resumed\\)\n\n"
+        "ℹ️ _Upstream is responding normally again\\._"
+    )
+
+
+def format_circuit_breaker_recovery_discord(model_id: str) -> str:
+    """Generate Discord notification when a circuit breaker recovers (CLOSED)."""
+    return (
+        f"✅ **Circuit Breaker Recovered!**\n\n"
+        f"🔌 **Provider/Model:** `{model_id}`\n"
+        f"📊 **Status:** `CLOSED` (Requests Resumed)\n\n"
+        f"ℹ️ Upstream is responding normally again."
+    )
+
+
 def format_circuit_breaker_alert_discord(
     model_id: str,
     reason: str = "Upstream error / timeout",

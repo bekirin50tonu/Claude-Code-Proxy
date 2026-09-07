@@ -12,6 +12,7 @@ from config import settings, stats
 from core.gateway.auth import auth_error_response as _auth_error_response
 from core.gateway.auth import check_auth as _check_auth
 from core.gateway.fallback_loop import _get_provider, provider, try_models
+from core.gateway.language_inject import inject_language_directive
 from core.gateway.model_select import pick_model_with_fallbacks
 from core.gateway.prompt_inject import inject_telegram_prompts
 from core.gateway.prompt_inject import (
@@ -24,13 +25,13 @@ from core.gateway.rate_limit import (
     rate_limiter,
 )
 from core.gateway.stream_handler import (
+    extract_session_id,
     log_after_stream,
     record_request_log,
     stream_mock_response,
 )
 from core.router.selector import AllModelsUnavailableError, model_selector
 from core.transformer.stream_engine import translate_non_stream_response
-from providers.openai import OpenAICompatibleProvider
 
 model_router = model_selector
 router = APIRouter()
@@ -89,11 +90,15 @@ async def messages_endpoint(request: Request) -> Any:
     from atomic.guards.subagent import subagent_guard
     body = subagent_guard.sanitize_payload(body, SUBAGENTS_ENABLED)
 
-    session_id = request.headers.get("x-session-id") or request.headers.get("x-conversation-id") or "default_session"
+    session_id = extract_session_id(request, body)
     body = inject_telegram_prompts(body, session_id)
+    inject_language_directive(body)
 
     client_model = body.get("model", "unknown")
     stream = body.get("stream", False)
+
+    from loguru import logger
+    logger.info("📩 [v1/messages] Request received from Claude Code CLI | Model: {} | Session: {}", client_model, session_id)
 
     mock_resp = check_mock_request(body)
     if mock_resp is not None:

@@ -29,6 +29,17 @@ from models.sse_schemas import (
     UsageInfo,
 )
 
+SYSTEM_TOOL_STRICT_RULE = (
+    "\n\n[SYSTEM DIRECTIVE FOR ACTION & TOOL EXECUTION]:\n"
+    "- If you state or plan to create files, edit code, run terminal commands, or view files, "
+    "you MUST invoke the structural tool call (Write, Edit, Bash, Read, etc.) in this response turn. "
+    "Do NOT output conversational text alone promising an action without calling the tool.\n"
+    "- When executing tasks involving MCP servers (such as Stitch, Figma, GitHub, etc.), "
+    "do NOT stop after merely listing or querying resources. You must actively retrieve the resource contents "
+    "(HTML, code, screens, schemas) and write/integrate them into the local project codebase (e.g. Next.js pages, components, CSS) "
+    "using local file creation/editing tools before concluding your turn."
+)
+
 
 class ModelConverter:
     """Static utility class for bidirectional Anthropic <-> OpenAI format conversions."""
@@ -86,7 +97,8 @@ class ModelConverter:
                     b.get("text", "") for b in system if isinstance(b, dict) and b.get("type") == "text"
                 )
             if sys_text.strip():
-                openai_msgs.append({"role": "system", "content": sys_text.strip()})
+                full_system = (sys_text.strip() + SYSTEM_TOOL_STRICT_RULE).strip()
+                openai_msgs.append({"role": "system", "content": full_system})
 
         for msg in messages:
             if not isinstance(msg, dict):
@@ -135,8 +147,14 @@ class ModelConverter:
             # Build assistant message with text and/or tool_calls
             if role == "assistant":
                 msg_obj: dict[str, Any] = {"role": "assistant"}
-                combined_text = "\n".join(text_parts).strip()
-                msg_obj["content"] = combined_text or None
+                content_str = "\n".join(text_parts).strip() if text_parts else None
+                if content_str:
+                    msg_obj["content"] = content_str
+                elif not tool_calls:
+                    msg_obj["content"] = " "
+                else:
+                    msg_obj["content"] = None
+
                 if tool_calls:
                     msg_obj["tool_calls"] = tool_calls
                 openai_msgs.append(msg_obj)

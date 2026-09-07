@@ -79,7 +79,7 @@ class DashboardWebSocketManager:
 
     async def _build_initial_snapshot(self) -> dict[str, Any]:
         """Gather current snapshot state across proxy modules."""
-        from config import settings, stats, model_registry
+        from config import model_registry, settings, stats
         from core.router.daily_tracker import daily_request_tracker
         from core.router.selector import model_selector
 

@@ -17,6 +17,7 @@ from bot.formatters import format_circuit_breaker_alert
 from bot.handlers.callbacks import button_callback_handler
 from bot.handlers.commands import (
     help_command,
+    reset_breakers_all_command,
     reset_circuit_command,
     run_command,
     set_model_command,
@@ -55,6 +56,7 @@ def init_telegram_bot_v2() -> Application | None:
         app.add_handler(CommandHandler("help", help_command))
         app.add_handler(CommandHandler("status", status_command))
         app.add_handler(CommandHandler("reset_circuit", reset_circuit_command))
+        app.add_handler(CommandHandler("reset_breakers", reset_breakers_all_command))
         app.add_handler(CommandHandler("set_model", set_model_command))
         app.add_handler(CommandHandler("run", run_command))
 

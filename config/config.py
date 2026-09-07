@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -12,12 +13,29 @@ from loguru import logger
 
 from models.telemetry import RequestLogEntry
 
-# Configure Loguru logger default format and stdout sink
+# PII and API key redaction filter for Loguru
+_API_KEY_PATTERNS = [
+    re.compile(r"(sk-[a-zA-Z0-9T3BlbkFJ]{20,})"),
+    re.compile(r"(nvapi-[a-zA-Z0-9_\-]{30,})"),
+    re.compile(r"(Bearer\s+)[a-zA-Z0-9_\-\.]+"),
+]
+
+
+def _pii_redaction_filter(record: dict[str, Any]) -> bool:
+    message = str(record.get("message", ""))
+    for pattern in _API_KEY_PATTERNS:
+        if pattern.search(message):
+            record["message"] = pattern.sub(r"\1***MASKED***", message)
+    return True
+
+
+# Configure Loguru logger default format, PII filter, and stdout sink
 logger.remove()
 logger.add(
     sys.stdout,
     format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
     level="INFO",
+    filter=_pii_redaction_filter,
 )
 
 # Load env file if it exists
@@ -56,50 +74,52 @@ def _ensure_models_yaml_exists() -> None:
                 logger.warning(f"Failed to migrate legacy models.yaml from {legacy_path}: {e}")
 
     default_yaml_content = """claude_default:
-  display_name: 1. Default (Recommended - Nemotron Ultra 550B)
-  description: "Claude Code CLI Default Selection — Nemotron 3 Ultra 550B on NVIDIA NIM"
-  primary: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
+  display_name: 1. Default (Nemotron 3 Super 120B)
+  description: "Claude Code CLI Default Selection — Nemotron 3 Super 120B on NVIDIA NIM"
+  primary: nvidia_nim/nvidia/nemotron-3-super-120b-a12b
   fallback_order:
-  - nvidia_nim/meta/llama-3.1-70b-instruct
-  - nvidia_nim/meta/llama-3.1-8b-instruct
+  - nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b
+  - nvidia_nim/openai/gpt-oss-20b
+  - nvidia_nim/meta/llama-3.2-11b-vision-instruct
   metadata:
-    context: 1000000
-    max_output: 32768
+    context: 128000
+    max_output: 16384
     rpm_limit: 38
     tpm_limit: 200000
     tags:
     - default
-    - opus-5
-    - 1m-context
     - agentic
     - coding
+    - free
 claude_opus:
-  display_name: 2. Opus (Nemotron Ultra 550B)
-  description: "Opus 5 with 1M context — Nemotron 3 Ultra 550B"
-  primary: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
+  display_name: 2. Opus (Nemotron 3 Super 120B)
+  description: "Opus with deep reasoning — Nemotron 3 Super 120B on NVIDIA NIM"
+  primary: nvidia_nim/nvidia/nemotron-3-super-120b-a12b
   fallback_order:
-  - nvidia_nim/meta/llama-3.1-70b-instruct
-  - nvidia_nim/meta/llama-3.1-8b-instruct
+  - nvidia_nim/openai/gpt-oss-20b
+  - nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b
+  - nvidia_nim/meta/llama-3.2-11b-vision-instruct
   metadata:
-    context: 1000000
-    max_output: 32768
+    context: 128000
+    max_output: 16384
     rpm_limit: 38
     tpm_limit: 200000
     tags:
     - opus-5
-    - 1m-context
     - reasoning
     - agentic
     - coding
+    - free
 claude_sonnet:
-  display_name: 3. Sonnet (Nemotron Ultra 550B)
-  description: "Sonnet — Nemotron 3 Ultra 550B on NVIDIA NIM"
-  primary: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
+  display_name: 3. Sonnet (Nemotron 3.5 Lightning 30B)
+  description: "Sonnet for fast coding & tool-calling — Nemotron 3.5 Lightning"
+  primary: nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b
   fallback_order:
-  - nvidia_nim/meta/llama-3.1-70b-instruct
-  - nvidia_nim/meta/llama-3.1-8b-instruct
+  - nvidia_nim/openai/gpt-oss-20b
+  - nvidia_nim/nvidia/nemotron-3-super-120b-a12b
+  - nvidia_nim/meta/llama-3.2-11b-vision-instruct
   metadata:
-    context: 1000000
+    context: 128000
     max_output: 16384
     rpm_limit: 38
     tpm_limit: 200000
@@ -108,38 +128,42 @@ claude_sonnet:
     - coding
     - tool-calling
     - agentic
+    - free
 claude_sonnet_1m:
-  display_name: 4. Sonnet 1M (Nemotron Ultra 550B)
-  description: Sonnet for long sessions with 1M context — Nemotron 3 Ultra 550B
-  primary: nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b
+  display_name: 4. Sonnet 1M (Nemotron 3 Super 120B)
+  description: "Sonnet for long sessions — Nemotron 3 Super 120B"
+  primary: nvidia_nim/nvidia/nemotron-3-super-120b-a12b
   fallback_order:
-  - nvidia_nim/meta/llama-3.1-70b-instruct
-  - nvidia_nim/meta/llama-3.1-8b-instruct
+  - nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b
+  - nvidia_nim/openai/gpt-oss-20b
+  - nvidia_nim/meta/llama-3.2-11b-vision-instruct
   metadata:
-    context: 1000000
-    max_output: 32768
+    context: 128000
+    max_output: 16384
     rpm_limit: 38
     tpm_limit: 200000
     tags:
     - sonnet-5
-    - 1m-context
     - coding
     - tool-calling
+    - free
 claude_haiku:
-  display_name: 5. Haiku (Fastest Llama 3.1 8B)
-  description: "Haiku — Fastest for quick answers"
-  primary: nvidia_nim/meta/llama-3.1-8b-instruct
+  display_name: 5. Haiku (Llama 3.2 11B Vision)
+  description: "Haiku for fast answers & vision — Llama 3.2 11B Vision"
+  primary: nvidia_nim/meta/llama-3.2-11b-vision-instruct
   fallback_order:
-  - nvidia_nim/meta/llama-3.1-70b-instruct
+  - nvidia_nim/openai/gpt-oss-20b
+  - nvidia_nim/nvidia/nemotron-3.5-lightning-30b-a3b
   metadata:
-    context: 200000
+    context: 128000
     max_output: 8192
     rpm_limit: 38
-    tpm_limit: 100000
     tags:
     - haiku-4.5
     - fast
+    - vision
     - coding
+    - free
 """
     _MODELS_YAML_PATH.write_text(default_yaml_content, encoding="utf-8")
     logger.info("Generated default .data/models.yaml")
@@ -336,6 +360,16 @@ def get_int(key: str, default: int) -> int:
         return default
 
 
+def get_float(key: str, default: float) -> float:
+    val = os.getenv(key)
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except ValueError:
+        return default
+
+
 PROVIDER_DEFAULTS: dict[str, dict[str, int]] = {
     "nvidia_nim": {
         "rpm": 38,
@@ -343,7 +377,7 @@ PROVIDER_DEFAULTS: dict[str, dict[str, int]] = {
         "rpd": 1000,
         "rate_window": 60,
         "max_concurrency": 5,
-        "context": 1000000,
+        "context": 128000,
         "max_output": 32768,
         "http_read_timeout": 120,
         "http_write_timeout": 10,
@@ -493,6 +527,30 @@ PROVIDER_DEFAULTS: dict[str, dict[str, int]] = {
         "http_write_timeout": 10,
         "http_connect_timeout": 2,
     },
+    "gemini": {
+        "rpm": 60,
+        "tpm": 1000000,
+        "rpd": 1500,
+        "rate_window": 60,
+        "max_concurrency": 10,
+        "context": 1000000,
+        "max_output": 32768,
+        "http_read_timeout": 60,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
+    "open_router": {
+        "rpm": 30,
+        "tpm": 200000,
+        "rpd": 1000,
+        "rate_window": 60,
+        "max_concurrency": 5,
+        "context": 128000,
+        "max_output": 16384,
+        "http_read_timeout": 60,
+        "http_write_timeout": 10,
+        "http_connect_timeout": 2,
+    },
 }
 
 
@@ -518,6 +576,8 @@ class Settings(BaseModel):
     # Upstream API keys and endpoints (supporting Docker Secrets at /run/secrets/)
     NVIDIA_NIM_API_KEYS: str = Field(default_factory=lambda: _get_secret_or_env("NVIDIA_NIM_API_KEYS", ""))
     NVIDIA_NIM_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("NVIDIA_NIM_API_KEY", ""))
+    NVIDIA_NIM_KEY_STRATEGY: str = Field(default_factory=lambda: _get_secret_or_env("NVIDIA_NIM_KEY_STRATEGY", "round_robin"))
+    NVIDIA_NIM_KEY_COOLDOWN_SECONDS: float = Field(default_factory=lambda: get_float("NVIDIA_NIM_KEY_COOLDOWN_SECONDS", 20.0))
 
     OPENROUTER_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("OPENROUTER_API_KEY", ""))
     TOKENROUTER_API_KEY: str = Field(default_factory=lambda: _get_secret_or_env("TOKENROUTER_API_KEY", ""))
@@ -546,10 +606,10 @@ class Settings(BaseModel):
 
     # Model Mappings (format: provider_type/model/name)
     MODEL_OPUS: str = Field(default_factory=lambda: os.getenv("MODEL_OPUS", "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b"))
-    MODEL_SONNET: str = Field(default_factory=lambda: os.getenv("MODEL_SONNET", "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b"))
+    MODEL_SONNET: str = Field(default_factory=lambda: os.getenv("MODEL_SONNET", "nvidia_nim/nvidia/nemotron-3-super-120b-a12b"))
     MODEL_SONNET_1M: str = Field(default_factory=lambda: os.getenv("MODEL_SONNET_1M", "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b"))
-    MODEL_HAIKU: str = Field(default_factory=lambda: os.getenv("MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct"))
-    MODEL: str = Field(default_factory=lambda: os.getenv("MODEL", "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b"))
+    MODEL_HAIKU: str = Field(default_factory=lambda: os.getenv("MODEL_HAIKU", "nvidia_nim/minimaxai/minimax-m3"))
+    MODEL: str = Field(default_factory=lambda: os.getenv("MODEL", "nvidia_nim/nvidia/nemotron-3-super-120b-a12b"))
 
     # Provider rate limits and performance controls
     REFRESH_TIME: int = Field(default_factory=lambda: get_int("REFRESH_TIME", 4))
@@ -560,12 +620,17 @@ class Settings(BaseModel):
     # Dedicated NVIDIA NIM Proactive Rate Limiter & Guard settings
     NVIDIA_NIM_SAFE_RPM: int = Field(default_factory=lambda: get_int("NVIDIA_NIM_SAFE_RPM", 38))
     NVIDIA_NIM_WINDOW_SECONDS: int = Field(default_factory=lambda: get_int("NVIDIA_NIM_WINDOW_SECONDS", 60))
-    NVIDIA_NIM_MAX_QUEUE_WAIT: int = Field(default_factory=lambda: get_int("NVIDIA_NIM_MAX_QUEUE_WAIT", 30))
+    NVIDIA_NIM_MAX_QUEUE_WAIT: int = Field(default_factory=lambda: get_int("NVIDIA_NIM_MAX_QUEUE_WAIT", 8))
 
     # HTTP client timeouts
-    HTTP_READ_TIMEOUT: int = Field(default_factory=lambda: get_int("HTTP_READ_TIMEOUT", 120))
-    HTTP_WRITE_TIMEOUT: int = Field(default_factory=lambda: get_int("HTTP_WRITE_TIMEOUT", 10))
-    HTTP_CONNECT_TIMEOUT: int = Field(default_factory=lambda: get_int("HTTP_CONNECT_TIMEOUT", 2))
+    HTTP_READ_TIMEOUT: int = Field(default_factory=lambda: get_int("HTTP_READ_TIMEOUT", 600))
+    HTTP_WRITE_TIMEOUT: int = Field(default_factory=lambda: get_int("HTTP_WRITE_TIMEOUT", 15))
+    HTTP_CONNECT_TIMEOUT: int = Field(default_factory=lambda: get_int("HTTP_CONNECT_TIMEOUT", 10))
+
+    # Dynamic workload-aware timeout controls
+    ENABLE_DYNAMIC_TIMEOUT: bool = Field(default_factory=lambda: get_bool("ENABLE_DYNAMIC_TIMEOUT", True))
+    MIN_DYNAMIC_READ_TIMEOUT: float = Field(default_factory=lambda: get_float("MIN_DYNAMIC_READ_TIMEOUT", 45.0))
+    MAX_DYNAMIC_READ_TIMEOUT: float = Field(default_factory=lambda: get_float("MAX_DYNAMIC_READ_TIMEOUT", 1800.0))
 
     # Messaging integration (Telegram / Discord)
     MESSAGING_PLATFORM: str = Field(default_factory=lambda: os.getenv("MESSAGING_PLATFORM", "discord"))
@@ -598,6 +663,7 @@ class Settings(BaseModel):
 
     # Server options
     RELOAD: bool = Field(default_factory=lambda: get_bool("RELOAD", False))
+    UNKNOWN_PROVIDER_MODE: str = Field(default_factory=lambda: os.getenv("UNKNOWN_PROVIDER_MODE", "raise"))
 
     # Thinking directive modes per model
     THINKING_MODE_OPUS: str = Field(default_factory=lambda: os.getenv("THINKING_MODE_OPUS", "inherit"))
@@ -644,6 +710,8 @@ class Settings(BaseModel):
 
         self.NVIDIA_NIM_API_KEYS = _get_secret_or_env("NVIDIA_NIM_API_KEYS", "")
         self.NVIDIA_NIM_API_KEY = _get_secret_or_env("NVIDIA_NIM_API_KEY", "")
+        self.NVIDIA_NIM_KEY_STRATEGY = _get_secret_or_env("NVIDIA_NIM_KEY_STRATEGY", "round_robin")
+        self.NVIDIA_NIM_KEY_COOLDOWN_SECONDS = get_float("NVIDIA_NIM_KEY_COOLDOWN_SECONDS", 20.0)
         self.OPENROUTER_API_KEY = _get_secret_or_env("OPENROUTER_API_KEY", "")
         self.TOKENROUTER_API_KEY = _get_secret_or_env("TOKENROUTER_API_KEY", "")
         self.GATEWAY_AUTH_TOKEN = _get_secret_or_env("GATEWAY_AUTH_TOKEN", "")
@@ -668,11 +736,11 @@ class Settings(BaseModel):
         self.LLAMA_CPP_BASE_URL = os.getenv("LLAMA_CPP_BASE_URL", "http://localhost:8080/v1")
         self.OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-        self.MODEL_OPUS = os.getenv("MODEL_OPUS", "nvidia_nim/meta/llama-3.3-70b-instruct")
-        self.MODEL_SONNET = os.getenv("MODEL_SONNET", "nvidia_nim/meta/llama-3.3-70b-instruct")
-        self.MODEL_SONNET_1M = os.getenv("MODEL_SONNET_1M", "nvidia_nim/meta/llama-3.3-70b-instruct")
-        self.MODEL_HAIKU = os.getenv("MODEL_HAIKU", "nvidia_nim/meta/llama-3.1-8b-instruct")
-        self.MODEL = os.getenv("MODEL", "nvidia_nim/meta/llama-3.3-70b-instruct")
+        self.MODEL_OPUS = os.getenv("MODEL_OPUS", "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b")
+        self.MODEL_SONNET = os.getenv("MODEL_SONNET", "nvidia_nim/nvidia/nemotron-3-super-120b-a12b")
+        self.MODEL_SONNET_1M = os.getenv("MODEL_SONNET_1M", "nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b")
+        self.MODEL_HAIKU = os.getenv("MODEL_HAIKU", "nvidia_nim/minimaxai/minimax-m3")
+        self.MODEL = os.getenv("MODEL", "nvidia_nim/nvidia/nemotron-3-super-120b-a12b")
 
         self.REFRESH_TIME = get_int("REFRESH_TIME", 4)
         self.PROVIDER_RATE_LIMIT = get_int("PROVIDER_RATE_LIMIT", 40)
@@ -683,7 +751,7 @@ class Settings(BaseModel):
         self.NVIDIA_NIM_SAFE_RPM = nim_rpm
         self.PROVIDER_NVIDIA_NIM_RPM = nim_rpm
         self.NVIDIA_NIM_WINDOW_SECONDS = get_int("NVIDIA_NIM_WINDOW_SECONDS", 60)
-        self.NVIDIA_NIM_MAX_QUEUE_WAIT = get_int("NVIDIA_NIM_MAX_QUEUE_WAIT", 30)
+        self.NVIDIA_NIM_MAX_QUEUE_WAIT = get_int("NVIDIA_NIM_MAX_QUEUE_WAIT", 8)
 
         self.HTTP_READ_TIMEOUT = get_int("HTTP_READ_TIMEOUT", 120)
         self.HTTP_WRITE_TIMEOUT = get_int("HTTP_WRITE_TIMEOUT", 10)
@@ -906,7 +974,7 @@ class ProxyStats:
         filtered_entries = []
         q = (query or "").strip().lower()
 
-        for req in reversed(self.recent_requests):
+        for req in self.recent_requests:
             if not q:
                 filtered_entries.append(req)
             else:

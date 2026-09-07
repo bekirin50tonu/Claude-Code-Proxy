@@ -59,6 +59,56 @@ async def test_heuristic_tool_parser_bash() -> None:
 
 
 @pytest.mark.asyncio
+async def test_heuristic_tool_parser_tool_code_json() -> None:
+    """Test HeuristicToolParser extracting <tool_code> blocks containing JSON command."""
+    parser = HeuristicToolParser(tools=["Bash", "Read", "Write"])
+
+    chunk = (
+        "Elbette, .claude/ dizininize bakalım:\n"
+        "<tool_code>\n"
+        '{"command":"ls /media/bekir/HDDStorage/PROJECTS/MY_SITE/website/.claude","description":"Lists files"}\n'
+        "</tool_code>"
+    )
+    events = await parser.process_chunk(chunk)
+
+    tool_start = [e for e in events if isinstance(e, SSEContentBlockStartEvent) and getattr(e.content_block, "type", None) == "tool_use"]
+    assert len(tool_start) == 1
+    assert tool_start[0].content_block.name == "Bash"
+
+    delta = [e for e in events if isinstance(e, SSEContentBlockDeltaEvent) and getattr(e.delta, "type", None) == "input_json_delta"]
+    assert len(delta) == 1
+    import json
+    parsed_input = json.loads(delta[0].delta.partial_json)
+    assert parsed_input["command"] == "ls /media/bekir/HDDStorage/PROJECTS/MY_SITE/website/.claude"
+
+
+@pytest.mark.asyncio
+async def test_heuristic_tool_parser_tool_code_xml() -> None:
+    """Test HeuristicToolParser extracting <tool_code> blocks containing XML <name> and <parameters>."""
+    parser = HeuristicToolParser(tools=["Bash", "Read", "Write"])
+
+    chunk = (
+        "<tool_code>\n"
+        "<name>Read</name>\n"
+        "<parameters>\n"
+        "    <file_path>/media/bekir/test.txt</file_path>\n"
+        "</parameters>\n"
+        "</tool_code>"
+    )
+    events = await parser.process_chunk(chunk)
+
+    tool_start = [e for e in events if isinstance(e, SSEContentBlockStartEvent) and getattr(e.content_block, "type", None) == "tool_use"]
+    assert len(tool_start) == 1
+    assert tool_start[0].content_block.name == "Read"
+
+    delta = [e for e in events if isinstance(e, SSEContentBlockDeltaEvent) and getattr(e.delta, "type", None) == "input_json_delta"]
+    assert len(delta) == 1
+    import json
+    parsed_input = json.loads(delta[0].delta.partial_json)
+    assert parsed_input["file_path"] == "/media/bekir/test.txt"
+
+
+@pytest.mark.asyncio
 async def test_subagent_guard_enforcement() -> None:
     """Test SubagentGuard enforcing run_in_background=False on Task tool calls in OFF bypass mode."""
     guard = SubagentGuard()
@@ -192,4 +242,122 @@ def test_safe_parse_json_robustness() -> None:
     assert parsed is not None
     assert parsed["name"] == "View"
     assert parsed["input"] == {"file_path": "src/index.ts"}
+
+
+@pytest.mark.asyncio
+async def test_stream_transformer_thinking_only_fallback_does_not_echo_private_thinking() -> None:
+    """Ensure thinking-only stream emits a space text delta, never echoing private thinking text."""
+    engine = StreamEngine(target_model="claude-3-5-sonnet", session_id="test_no_echo_sess")
+
+    async def mock_thinking_chunks():
+        yield {"choices": [{"delta": {"reasoning_content": "Private internal reasoning that should not leak to user"}}]}
+        yield {"choices": [{"finish_reason": "stop"}]}
+
+    events = [ev async for ev in engine.transform_stream(mock_thinking_chunks())]
+    full_sse = "".join(events)
+
+    assert "event: message_start" in full_sse
+    assert "Private internal reasoning" in full_sse  # In thinking_delta
+    # Crucial: text_delta must be " ", not the private thinking text
+    assert '{"type": "text_delta", "text": " "}' in full_sse
+    assert '"text": "Private internal reasoning' not in full_sse
+
+
+@pytest.mark.asyncio
+async def test_stream_transformer_no_duplicate_content_block_stop() -> None:
+    """Verify stream never emits consecutive duplicate content_block_stop events for the same block index."""
+    engine = StreamEngine(target_model="claude-3-5-sonnet", session_id="test_no_dup_stop")
+
+    async def mock_chunks():
+        yield {"choices": [{"delta": {"content": "<think>Thinking chunk</think>"}}]}
+        yield {"choices": [{"finish_reason": "stop"}]}
+
+    events = [ev async for ev in engine.transform_stream(mock_chunks())]
+    
+    # Count content_block_stop for index 0
+    stop_0_count = sum(1 for ev in events if 'content_block_stop' in ev and '"index": 0' in ev)
+    assert stop_0_count == 1, f"Expected exactly 1 content_block_stop for index 0, got {stop_0_count}"
+
+
+@pytest.mark.asyncio
+async def test_native_tool_call_streaming_sanitizes_input() -> None:
+    """Verify native tool call arguments are sanitized before being emitted to the SSE stream."""
+    engine = StreamEngine(target_model="claude-3-5-sonnet", session_id="test_tool_sanitize")
+
+    async def mock_tool_chunks():
+        yield {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_read_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "Read",
+                                    "arguments": '{"description": "Read file", "file_path": "AGENTS.md"}',
+                                },
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        yield {"choices": [{"finish_reason": "tool_calls"}]}
+
+    events = [ev async for ev in engine.transform_stream(mock_tool_chunks())]
+    full_sse = "".join(events)
+
+    assert "event: content_block_start" in full_sse
+    assert '"name": "Read"' in full_sse
+    # Crucial: The emitted input_json_delta must NOT contain the illegal 'description' parameter
+    assert "description" not in full_sse
+    assert "AGENTS.md" in full_sse
+    assert "event: content_block_stop" in full_sse
+
+
+def test_mock_suggestion_mode_intercepted() -> None:
+    """Verify [SUGGESTION MODE: requests are intercepted at 0ms by api/mock.py."""
+    from api.mock import check_mock_request
+
+    req_body = {
+        "model": "claude-opus-5",
+        "messages": [
+            {
+                "role": "user",
+                "content": "[SUGGESTION MODE: Suggest what the user might naturally type next into Claude Code.]",
+            }
+        ],
+        "tools": [{"name": "Bash", "description": "Run bash"}],
+    }
+
+    mock_resp = check_mock_request(req_body)
+    assert mock_resp is not None
+    assert mock_resp["role"] == "assistant"
+    assert mock_resp["content"] == [{"type": "text", "text": ""}]
+    assert mock_resp["stop_reason"] == "end_turn"
+
+
+def test_translate_messages_preserves_assistant_thinking() -> None:
+    """Verify assistant messages with thinking blocks are translated into <think> tags."""
+    from providers.openai import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider()
+    messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "Let me examine AGENTS.md first"},
+                {"type": "tool_use", "id": "call_1", "name": "Bash", "input": {"command": "ls"}},
+            ],
+        }
+    ]
+
+    translated = provider.translate_messages(messages)
+    assert len(translated) == 1
+    assert translated[0]["role"] == "assistant"
+    assert "<think>\nLet me examine AGENTS.md first\n</think>" in translated[0]["content"]
+    assert translated[0]["tool_calls"][0]["function"]["name"] == "Bash"
+
 

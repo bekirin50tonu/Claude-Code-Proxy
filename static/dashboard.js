@@ -1034,7 +1034,9 @@ async function fetchDevMetrics() {
             if (nim.key_details.length === 0) {
                 elKeyList.innerHTML = `<span style="font-size: 0.7rem; color: var(--text-dim);">No NIM keys loaded</span>`;
             } else {
-                elKeyList.innerHTML = nim.key_details.map(k => {
+                const stratLabel = (nim.strategy || 'round_robin').toUpperCase().replace('_', ' ');
+                const stratBadge = `<span style="font-size: 0.68rem; font-family: 'JetBrains Mono', monospace; font-weight: 800; color: #fbbf24; background: rgba(251,191,36,0.12); border: 1px solid rgba(251,191,36,0.3); padding: 2px 6px; border-radius: 4px;">🎯 STRATEGY: ${escapeHtml(stratLabel)}</span>`;
+                elKeyList.innerHTML = stratBadge + ' ' + nim.key_details.map(k => {
                     const isPassive = k.cooldown_s > 0;
                     const col = isPassive ? '#f87171' : '#4ade80';
                     const bg = isPassive ? 'rgba(248,113,113,0.1)' : 'rgba(74,222,128,0.1)';
